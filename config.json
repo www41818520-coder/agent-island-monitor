@@ -18,6 +18,9 @@
   "quiet_height": 34,
   "expanded_height": 50,
   "top_offset": 8,
+  "position_mode": "center",
+  "custom_x": null,
+  "custom_y": null,
   "colors": {
     "background": "#050505",
     "background_done": "#07160d",

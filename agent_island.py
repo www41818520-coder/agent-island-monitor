@@ -46,6 +46,9 @@ DEFAULT_CONFIG = {
     "quiet_height": 34,
     "expanded_height": 50,
     "top_offset": 8,
+    "position_mode": "center",
+    "custom_x": None,
+    "custom_y": None,
     "colors": {
         "background": "#050505",
         "background_done": "#07160d",
@@ -573,6 +576,9 @@ class AgentIsland(tk.Tk):
         self.geometry_target = None
         self.displayed_geometry = None
         self.geometry_anim_job = None
+        self.drag_start = None
+        self.click_after_id = None
+        self.suppress_single_until = 0
         self.phase = 0
         self.codex_region = None
         self.cursor_region = None
@@ -585,8 +591,11 @@ class AgentIsland(tk.Tk):
 
         self.canvas = tk.Canvas(self, highlightthickness=0, bd=0, bg=TRANSPARENT_COLOR)
         self.canvas.pack(fill="both", expand=True)
-        self.canvas.bind("<Button-1>", self.on_click)
+        self.canvas.bind("<ButtonPress-1>", self.on_drag_start)
+        self.canvas.bind("<B1-Motion>", self.on_drag_motion)
+        self.canvas.bind("<ButtonRelease-1>", self.on_pointer_release)
         self.canvas.bind("<Double-Button-1>", self.on_double_click)
+        self.canvas.bind("<Button-3>", self.show_window_menu)
         self.canvas.bind("<Enter>", self.on_mouse_enter)
         self.bind("<Escape>", lambda _event: self.shutdown())
 
@@ -619,8 +628,13 @@ class AgentIsland(tk.Tk):
         )
         extra = 12 if now_seconds() < self.flash_until and not quiet else 0
         width = base_width + extra
-        x = int((self.winfo_screenwidth() - width) / 2)
+        if self.config_data.get("position_mode") == "custom":
+            x = int(self.config_data.get("custom_x") or 0)
+        else:
+            x = int((self.winfo_screenwidth() - width) / 2)
         normal_y = int(self.config_data["top_offset"])
+        if self.config_data.get("position_mode") == "custom":
+            normal_y = int(self.config_data.get("custom_y") or normal_y)
         y = normal_y
         if self.tucked:
             y = -height + int(self.config_data.get("tucked_visible_pixels", 6))
@@ -852,6 +866,10 @@ class AgentIsland(tk.Tk):
         self.render()
 
     def on_double_click(self, event):
+        if self.click_after_id:
+            self.after_cancel(self.click_after_id)
+            self.click_after_id = None
+        self.suppress_single_until = time.time() + 0.35
         if self.is_quiet_compact():
             if not activate_matching_window("codex", self.windows):
                 self.peek_until = now_seconds() + 2
@@ -866,6 +884,80 @@ class AgentIsland(tk.Tk):
             return
         if not activate_matching_window("codex", self.windows):
             self.peek_until = now_seconds() + 2
+
+    def on_drag_start(self, event):
+        self.drag_start = {
+            "pointer_x": event.x_root,
+            "pointer_y": event.y_root,
+            "window_x": self.winfo_x(),
+            "window_y": self.winfo_y(),
+            "moved": False,
+        }
+
+    def on_drag_motion(self, event):
+        if not self.drag_start:
+            return
+        dx = event.x_root - self.drag_start["pointer_x"]
+        dy = event.y_root - self.drag_start["pointer_y"]
+        if abs(dx) < 4 and abs(dy) < 4:
+            return
+        self.drag_start["moved"] = True
+        x = self.drag_start["window_x"] + dx
+        y = self.drag_start["window_y"] + dy
+        x = max(0, min(x, self.winfo_screenwidth() - self.current_width))
+        y = max(0, min(y, self.winfo_screenheight() - self.current_height))
+        self.config_data["position_mode"] = "custom"
+        self.config_data["custom_x"] = int(x)
+        self.config_data["custom_y"] = int(y)
+        self.displayed_geometry = (int(x), int(y), self.current_width, self.current_height)
+        self.geometry_target = self.displayed_geometry
+        self.apply_geometry(self.displayed_geometry)
+
+    def on_pointer_release(self, event):
+        if self.drag_start and self.drag_start.get("moved"):
+            save_config(self.config_data)
+            self.after(80, lambda: setattr(self, "drag_start", None))
+            return
+        self.after(80, lambda: setattr(self, "drag_start", None))
+        if time.time() < self.suppress_single_until:
+            return
+        if self.click_after_id:
+            self.after_cancel(self.click_after_id)
+        self.click_after_id = self.after(180, lambda: self.run_single_click(event))
+
+    def run_single_click(self, event):
+        self.click_after_id = None
+        self.on_click(event)
+
+    def show_window_menu(self, _event=None):
+        menu = user32.CreatePopupMenu()
+        user32.AppendMenuW(menu, MF_STRING, 2001, "恢复默认位置")
+        user32.AppendMenuW(menu, MF_STRING, 2002, "关闭")
+        point = POINT()
+        user32.GetCursorPos(ctypes.byref(point))
+        user32.SetForegroundWindow(self.winfo_id())
+        command = user32.TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            point.x,
+            point.y,
+            0,
+            self.winfo_id(),
+            None,
+        )
+        user32.DestroyMenu(menu)
+        if command == 2001:
+            self.reset_position()
+        elif command == 2002:
+            self.shutdown()
+
+    def reset_position(self):
+        self.config_data["position_mode"] = "center"
+        self.config_data["custom_x"] = None
+        self.config_data["custom_y"] = None
+        save_config(self.config_data)
+        self.tucked = False
+        self.render()
 
     def on_mouse_enter(self, _event):
         if not self.config_data.get("auto_tuck_on_hover"):
