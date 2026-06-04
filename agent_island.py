@@ -14,6 +14,7 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = APP_DIR / "config.json"
 CODEX_DIR = Path(os.environ.get("USERPROFILE", "")) / ".codex"
+TRANSPARENT_COLOR = "#ff00ff"
 STARTUP_LINK = (
     Path(os.environ.get("APPDATA", ""))
     / "Microsoft"
@@ -573,9 +574,10 @@ class AgentIsland(tk.Tk):
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.985)
-        self.configure(bg="#010101")
+        self.attributes("-transparentcolor", TRANSPARENT_COLOR)
+        self.configure(bg=TRANSPARENT_COLOR)
 
-        self.canvas = tk.Canvas(self, highlightthickness=0, bd=0, bg="#010101")
+        self.canvas = tk.Canvas(self, highlightthickness=0, bd=0, bg=TRANSPARENT_COLOR)
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Button-1>", self.on_click)
         self.canvas.bind("<Enter>", self.on_mouse_enter)
@@ -635,7 +637,7 @@ class AgentIsland(tk.Tk):
         width = self.current_width
         height = self.current_height
         self.canvas.delete("all")
-        self.canvas.configure(width=width, height=height, bg="#010101")
+        self.canvas.configure(width=width, height=height, bg=TRANSPARENT_COLOR)
         radius = min(30, height // 2 - 1)
         self.draw_rounded_rect(7, 9, width - 7, height - 1, radius, self.colors["shadow"], "")
         self.draw_rounded_rect(3, 3, width - 3, height - 5, radius, "#000000", self.colors["border"], 1)
