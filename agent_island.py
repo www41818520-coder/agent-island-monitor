@@ -41,7 +41,7 @@ DEFAULT_CONFIG = {
     "quiet_width": 118,
     "collapsed_height": 50,
     "quiet_height": 34,
-    "expanded_height": 188,
+    "expanded_height": 50,
     "top_offset": 8,
     "colors": {
         "background": "#050505",
@@ -737,58 +737,7 @@ class AgentIsland(tk.Tk):
             sweep_x = 26 + int(progress * 360)
             self.draw_rounded_rect(max(26, sweep_x - 70), 44, min(398, sweep_x), 47, 3, self.colors["done"], "")
 
-        if not self.expanded:
-            if codex_status == "Needs You":
-                self.canvas.create_text(
-                    212,
-                    47,
-                    text="Needs your input",
-                    fill=self.colors["needs_you"],
-                    anchor="n",
-                    font=("Segoe UI Semibold", 8),
-                )
-            return
-
-        self.draw_rounded_rect(18, 54, 406, 173, 18, "#0b0b0d", "#202127", 1)
-        self.draw_rounded_rect(26, 58, 398, 71, 8, "#202127", "")
-
-        summary = self.codex_summary()
-        self.canvas.create_text(32, 76, text=summary, fill=self.colors["text"], anchor="w", font=("Segoe UI Semibold", 9))
-
-        y = 98
-        for item in self.codex["items"][:3]:
-            color = self.status_color(item["status"], self.colors["running"])
-            title = truncate_text(item["title"], 36)
-            body = truncate_text(item["latest_body"] or "No recent Codex event", 42)
-            self.canvas.create_oval(32, y - 5, 42, y + 5, fill="", outline="#34363d", width=1)
-            self.canvas.create_oval(35, y - 2, 39, y + 2, fill=color, outline="")
-            self.canvas.create_text(
-                50,
-                y,
-                text=f"{item['status']} · {age_text(item['since_ts'])}  {title}",
-                fill=self.colors["text"],
-                anchor="w",
-                font=("Segoe UI", 8),
-            )
-            self.canvas.create_text(50, y + 16, text=body, fill=self.colors["muted"], anchor="w", font=("Segoe UI", 8))
-            y += 34
-        if not self.codex["items"]:
-            self.canvas.create_text(32, 102, text="No Codex thread found", fill=self.colors["muted"], anchor="w", font=("Segoe UI", 8))
-        cursor_title = truncate_text(self.cursor.get("title") or "No Cursor window title", 58)
-        self.canvas.create_text(32, 162, text=f"Cursor/CC  {cursor_title}", fill=self.colors["muted"], anchor="w", font=("Segoe UI", 8))
-
-    def codex_summary(self):
-        counts = self.codex.get("counts", {})
-        parts = []
-        if counts.get("Needs You"):
-            parts.append(f"{counts['Needs You']} needs you")
-        if counts.get("Running"):
-            parts.append(f"{counts['Running']} running")
-        if counts.get("Done"):
-            parts.append(f"{counts['Done']} done")
-        if not parts:
-            parts.append(self.codex["status"].lower())
-        return "Codex  " + " · ".join(parts)
+        return
 
     def refresh_state(self):
         names, pid_to_name = process_snapshot()

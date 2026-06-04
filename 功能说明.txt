@@ -5,14 +5,14 @@ E:\08-codex project\agent-island-monitor
 
 一、这个工具是做什么的
 
-这是一个 Windows 顶部悬浮的 AI 状态迷你胶囊。平时只显示两个极小状态点，尽量不遮挡网页顶部按钮和文字；当 Codex 有运行、完成或需要你处理的事件时，才舒展开显示详情。
+这是一个 Windows 顶部悬浮的 AI 状态迷你胶囊。平时只显示两个极小状态点，尽量不遮挡网页顶部按钮和文字；当 Codex 有运行、完成或需要你处理的事件时，才舒展开显示两个极简状态胶囊。
 
 当前监控两项：
 
 1. Codex
    - 读取本机 Codex 的本地状态文件和日志。
    - 判断 Codex 大致处于 Running、Needs You、Done、Idle、Offline 哪种状态。
-   - 展开后会显示最近多个 Codex 线程，并按 Needs You、Running、Done/Idle 的优先级排序。
+   - 展开后只显示 Codex 状态胶囊，不显示日志或线程列表。
 
 2. Cursor/CC
    - 检测 Cursor 是否运行。
@@ -46,7 +46,7 @@ Cursor/CC:
 四、交互方式
 
 点击迷你胶囊：
-- 展开完整小岛。
+- 展开双状态胶囊。
 
 展开态点击 Codex 胶囊：
 - 尝试召唤 Codex 窗口到前台，并最大化显示。
@@ -83,7 +83,6 @@ config.json
 - 静音提醒
 - 小岛颜色
 - Codex 活跃和 Needs You 判断时间阈值
-- 展开态显示的 Codex 线程数量
 
 七、当前限制
 

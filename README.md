@@ -1,6 +1,6 @@
 ﻿# Agent Island Monitor
 
-Windows 顶部悬浮的 AI 状态迷你胶囊，灵感来自 Apple Dynamic Island。它用于在后台运行 Codex、Cursor/CC 时，用最小遮挡查看状态，并在需要时展开为完整控制入口。
+Windows 顶部悬浮的 AI 状态迷你胶囊，灵感来自 Apple Dynamic Island。它用于在后台运行 Codex、Cursor/CC 时，用最小遮挡查看状态，并在需要时展开为极简控制入口。
 
 ![Agent Island Monitor screenshot](assets/screenshot.png)
 
@@ -11,6 +11,7 @@ Windows 顶部悬浮的 AI 状态迷你胶囊，灵感来自 Apple Dynamic Islan
 - **Codex 状态监控**：读取本机 Codex 日志和状态文件，显示 `Running`、`Needs You`、`Done`、`Idle`、`Offline`。
 - **Cursor/CC 诚实状态**：Cursor 开着但没有证据表明 AI 在生成时显示 `Open`，不误报 `Running`。
 - **一键召唤窗口**：展开态点击 `Codex` 或 `Cursor/CC` 胶囊，自动把对应窗口切到前台并最大化。
+- **极简展开态**：展开后只显示 Codex 与 Cursor/CC 两个胶囊，不显示日志、线程列表或冗余文字。
 - **托盘菜单**：支持显示/隐藏、安静模式、静音提醒、开机自启、退出。
 - **无需第三方依赖**：使用 Python 标准库 + Tkinter + Win32 `ctypes` 实现。
 
@@ -38,7 +39,7 @@ Windows 顶部悬浮的 AI 状态迷你胶囊，灵感来自 Apple Dynamic Islan
 - `Running`：状态变化时展开约 4 秒，然后自动回到迷你胶囊。
 - `Done`：完成时展开约 4 秒，显示完成反馈，然后自动回到迷你胶囊。
 - `Needs You`：持续展开，直到状态解除。
-- 手动点击迷你胶囊：展开完整小岛。
+- 手动点击迷你胶囊：展开双状态胶囊。
 - 展开态点击空白区域：收回迷你胶囊。
 
 ## 使用方法
@@ -67,7 +68,7 @@ powershell -ExecutionPolicy Bypass -File .\uninstall_startup.ps1
 
 ### 交互
 
-- 点击迷你胶囊：展开完整小岛。
+- 点击迷你胶囊：展开双状态胶囊。
 - 展开态点击 `Codex` 胶囊：召唤 Codex 到前台并最大化。
 - 展开态点击 `Cursor/CC` 胶囊：召唤 Cursor 到前台并最大化。
 - 展开态点击空白区域：收回迷你胶囊。
@@ -85,7 +86,6 @@ powershell -ExecutionPolicy Bypass -File .\uninstall_startup.ps1
 - 静音提醒
 - 小岛颜色
 - Codex 活跃/Needs You 判断阈值
-- 展开态显示的线程数量
 
 ## 当前限制
 
