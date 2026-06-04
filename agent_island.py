@@ -86,6 +86,14 @@ user32.CallWindowProcW.argtypes = [
     wintypes.WPARAM,
     wintypes.LPARAM,
 ]
+user32.ReleaseCapture.restype = wintypes.BOOL
+user32.SendMessageW.restype = ctypes.c_longlong
+user32.SendMessageW.argtypes = [
+    wintypes.HWND,
+    wintypes.UINT,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+]
 
 SW_RESTORE = 9
 SW_MAXIMIZE = 3
@@ -93,7 +101,9 @@ WM_USER = 0x0400
 WM_TRAY = WM_USER + 20
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONUP = 0x0205
+WM_NCLBUTTONDOWN = 0x00A1
 WM_DESTROY = 0x0002
+HTCAPTION = 2
 GWL_WNDPROC = -4
 
 NIM_ADD = 0
@@ -682,6 +692,7 @@ class AgentIsland(tk.Tk):
         self.displayed_geometry = None
         self.geometry_anim_job = None
         self.drag_start = None
+        self.native_drag_active = False
         self.suppress_single_until = 0
         self.compact_double_until = 0
         self.pending_double_agent_key = None
@@ -705,6 +716,7 @@ class AgentIsland(tk.Tk):
         self.canvas.bind("<Double-Button-1>", self.on_double_click)
         self.canvas.bind("<Button-3>", self.show_window_menu)
         self.canvas.bind("<Enter>", self.on_mouse_enter)
+        self.canvas.bind("<Leave>", self.on_mouse_leave)
         self.bind("<Escape>", lambda _event: self.shutdown())
 
         self.update_idletasks()
@@ -719,8 +731,6 @@ class AgentIsland(tk.Tk):
         if self.expanded or not self.config_data.get("quiet_mode"):
             return False
         if now_seconds() < self.peek_until or now_seconds() < self.flash_until:
-            return False
-        if self.codex and self.codex["status"] == "Needs You":
             return False
         return True
 
@@ -1019,42 +1029,23 @@ class AgentIsland(tk.Tk):
         self.after(120, self.animate)
 
     def on_click(self, event):
-        was_quiet = self.is_quiet_compact()
-        clicked_agent = None if was_quiet else self.agent_at(event.x, event.y)
-        if was_quiet:
-            self.compact_double_until = time.time() + 0.5
-            self.pending_double_agent_key = None
-        elif clicked_agent:
-            self.pending_double_agent_key = clicked_agent["key"]
-            self.pending_double_agent_until = time.time() + 0.5
-
-        if was_quiet:
-            self.expanded = True
-            self.expanded_until = time.time() + float(self.config_data.get("manual_expand_seconds", 2))
-            self.peek_until = 0
-            self.render()
-            return
-        self.expanded = not self.expanded
-        self.expanded_until = (
-            time.time() + float(self.config_data.get("manual_expand_seconds", 2))
-            if self.expanded
-            else 0
-        )
+        self.expanded = False
+        self.expanded_until = 0
         self.peek_until = 0
         self.render()
 
     def on_double_click(self, event):
         self.suppress_single_until = time.time() + 0.35
-        if time.time() < self.compact_double_until:
-            self.compact_double_until = 0
-            if not activate_matching_window("codex", self.windows):
-                self.peek_until = now_seconds() + 2
-            return
         if self.pending_double_agent_key and time.time() < self.pending_double_agent_until:
             key = self.pending_double_agent_key
             self.pending_double_agent_key = None
             agent = next((item for item in self.agents if item["key"] == key), None)
             if agent and not activate_agent(agent, self.windows):
+                self.peek_until = now_seconds() + 2
+            return
+        if time.time() < self.compact_double_until:
+            self.compact_double_until = 0
+            if not activate_matching_window("codex", self.windows):
                 self.peek_until = now_seconds() + 2
             return
         if self.is_quiet_compact():
@@ -1079,6 +1070,17 @@ class AgentIsland(tk.Tk):
         return None
 
     def on_drag_start(self, event):
+        if self.geometry_anim_job:
+            self.after_cancel(self.geometry_anim_job)
+            self.geometry_anim_job = None
+        was_quiet = self.is_quiet_compact()
+        agent = self.agent_at(event.x, event.y)
+        if was_quiet:
+            self.compact_double_until = time.time() + 0.5
+            self.pending_double_agent_key = None
+        elif agent:
+            self.pending_double_agent_key = agent["key"]
+            self.pending_double_agent_until = time.time() + 0.5
         self.drag_start = {
             "pointer_x": event.x_root,
             "pointer_y": event.y_root,
@@ -1095,26 +1097,49 @@ class AgentIsland(tk.Tk):
         if abs(dx) < 4 and abs(dy) < 4:
             return
         self.drag_start["moved"] = True
-        x = self.drag_start["window_x"] + dx
-        y = self.drag_start["window_y"] + dy
-        x = max(0, min(x, self.winfo_screenwidth() - self.current_width))
-        y = max(0, min(y, self.winfo_screenheight() - self.current_height))
+        self.start_native_drag(dx, dy)
+
+    def start_native_drag(self, dx, dy):
+        drag = self.drag_start
+        self.drag_start = None
+        self.native_drag_active = True
+        self.expanded_until = 0
+        self.peek_until = 0
+        try:
+            user32.ReleaseCapture()
+            user32.SendMessageW(self.winfo_id(), WM_NCLBUTTONDOWN, HTCAPTION, 0)
+        except Exception:
+            self.native_drag_active = False
+            if drag:
+                self.fallback_drag_move(drag, dx, dy)
+            return
+        self.native_drag_active = False
+        self.update_idletasks()
+        x = self.winfo_x()
+        y = self.winfo_y()
+        self.config_data["position_mode"] = "custom"
+        self.config_data["custom_x"] = int(x)
+        self.config_data["custom_y"] = int(y)
+        self.displayed_geometry = (int(x), int(y), self.current_width, self.current_height)
+        self.geometry_target = self.displayed_geometry
+        save_config(self.config_data)
+
+    def fallback_drag_move(self, drag, dx, dy):
+        x = drag["window_x"] + dx
+        y = drag["window_y"] + dy
         self.config_data["position_mode"] = "custom"
         self.config_data["custom_x"] = int(x)
         self.config_data["custom_y"] = int(y)
         self.displayed_geometry = (int(x), int(y), self.current_width, self.current_height)
         self.geometry_target = self.displayed_geometry
         self.apply_geometry(self.displayed_geometry)
+        save_config(self.config_data)
 
     def on_pointer_release(self, event):
         if self.drag_start and self.drag_start.get("moved"):
-            save_config(self.config_data)
-            self.after(80, lambda: setattr(self, "drag_start", None))
+            self.drag_start = None
             return
-        self.after(80, lambda: setattr(self, "drag_start", None))
-        if time.time() < self.suppress_single_until:
-            return
-        self.on_click(event)
+        self.drag_start = None
 
     def show_window_menu(self, event=None):
         menu = user32.CreatePopupMenu()
@@ -1181,12 +1206,21 @@ class AgentIsland(tk.Tk):
         self.render()
 
     def on_mouse_enter(self, _event):
-        if not self.config_data.get("auto_tuck_on_hover"):
+        if self.native_drag_active:
             return
-        if self.expanded or self.codex and self.codex["status"] == "Needs You":
+        self.tucked = False
+        self.expanded = True
+        self.expanded_until = 0
+        self.peek_until = 0
+        self.render()
+
+    def on_mouse_leave(self, _event):
+        if self.native_drag_active or self.drag_start:
             return
-        self.tucked = True
-        self.geometry_for_state()
+        self.expanded = False
+        self.expanded_until = 0
+        self.peek_until = 0
+        self.render()
 
     def watch_pointer(self):
         if self.tucked:
