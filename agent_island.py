@@ -31,15 +31,9 @@ DEFAULT_CONFIG = {
     "codex_active_seconds": 20,
     "codex_waiting_seconds": 60,
     "completion_flash_seconds": 4,
-    "done_led_seconds": 45,
     "manual_expand_seconds": 2,
-    "transition_ms": 120,
-    "transition_steps": 8,
-    "drag_frame_ms": 16,
-    "click_debounce_ms": 90,
-    "compact_led_enabled": False,
-    "compact_led_beads": 32,
-    "compact_led_speed": 3.0,
+    "transition_ms": 110,
+    "transition_steps": 6,
     "animation_enabled": True,
     "auto_tuck_on_hover": False,
     "tucked_visible_pixels": 6,
@@ -92,16 +86,6 @@ user32.CallWindowProcW.argtypes = [
     wintypes.WPARAM,
     wintypes.LPARAM,
 ]
-user32.SetWindowPos.restype = wintypes.BOOL
-user32.SetWindowPos.argtypes = [
-    wintypes.HWND,
-    wintypes.HWND,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    ctypes.c_int,
-    wintypes.UINT,
-]
 
 SW_RESTORE = 9
 SW_MAXIMIZE = 3
@@ -111,10 +95,6 @@ WM_LBUTTONUP = 0x0202
 WM_RBUTTONUP = 0x0205
 WM_DESTROY = 0x0002
 GWL_WNDPROC = -4
-SWP_NOSIZE = 0x0001
-SWP_NOZORDER = 0x0004
-SWP_NOACTIVATE = 0x0010
-SWP_SHOWWINDOW = 0x0040
 
 NIM_ADD = 0
 NIM_MODIFY = 1
@@ -604,27 +584,6 @@ def age_text(ts):
     return f"{minutes // 60}h"
 
 
-def hex_to_rgb(color):
-    color = str(color or "#ffffff").strip().lstrip("#")
-    if len(color) != 6:
-        return 255, 255, 255
-    try:
-        return tuple(int(color[index : index + 2], 16) for index in (0, 2, 4))
-    except ValueError:
-        return 255, 255, 255
-
-
-def blend_color(a, b, amount):
-    amount = max(0.0, min(1.0, float(amount)))
-    ar, ag, ab = hex_to_rgb(a)
-    br, bg, bb = hex_to_rgb(b)
-    return "#{:02x}{:02x}{:02x}".format(
-        int(ar + (br - ar) * amount),
-        int(ag + (bg - ag) * amount),
-        int(ab + (bb - ab) * amount),
-    )
-
-
 class TrayIcon:
     def __init__(self, app):
         self.app = app
@@ -715,7 +674,6 @@ class AgentIsland(tk.Tk):
         self.last_main_status = "Offline"
         self.has_seen_status = False
         self.flash_until = 0
-        self.done_notice_until = 0
         self.peek_until = 0
         self.expanded_until = 0
         self.tucked = False
@@ -724,13 +682,10 @@ class AgentIsland(tk.Tk):
         self.displayed_geometry = None
         self.geometry_anim_job = None
         self.drag_start = None
-        self.drag_pending_geometry = None
-        self.drag_frame_job = None
         self.suppress_single_until = 0
         self.compact_double_until = 0
         self.pending_double_agent_key = None
         self.pending_double_agent_until = 0
-        self.last_click_ts = 0
         self.phase = 0
         self.codex_region = None
         self.cursor_region = None
@@ -764,6 +719,8 @@ class AgentIsland(tk.Tk):
         if self.expanded or not self.config_data.get("quiet_mode"):
             return False
         if now_seconds() < self.peek_until or now_seconds() < self.flash_until:
+            return False
+        if self.codex and self.codex["status"] == "Needs You":
             return False
         return True
 
@@ -820,23 +777,8 @@ class AgentIsland(tk.Tk):
         x, y, width, height = geometry
         self.geometry(f"{width}x{height}+{x}+{y}")
 
-    def apply_drag_geometry(self, geometry):
-        x, y, width, height = geometry
-        hwnd = self.winfo_id()
-        moved = user32.SetWindowPos(
-            hwnd,
-            None,
-            int(x),
-            int(y),
-            0,
-            0,
-            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        )
-        if not moved:
-            self.geometry(f"{width}x{height}+{x}+{y}")
-
     def animate_geometry(self, start, target, step):
-        total = max(1, int(self.config_data.get("transition_steps", 8)))
+        total = max(1, int(self.config_data.get("transition_steps", 6)))
         t = min(1.0, step / total)
         eased = 1 - (1 - t) ** 3
         current = tuple(
@@ -850,7 +792,7 @@ class AgentIsland(tk.Tk):
             self.displayed_geometry = target
             self.geometry_anim_job = None
             return
-        delay = max(8, int(self.config_data.get("transition_ms", 120)) // total)
+        delay = max(8, int(self.config_data.get("transition_ms", 110)) // total)
         self.geometry_anim_job = self.after(delay, lambda: self.animate_geometry(start, target, step + 1))
 
     def draw_rounded_rect(self, x1, y1, x2, y2, radius, fill, outline="", width=1):
@@ -878,92 +820,6 @@ class AgentIsland(tk.Tk):
         self.draw_rounded_rect(24, 8, width - 24, 18, 8, "#6d6e76", "")
         self.draw_rounded_rect(38, 10, width - 38, 14, 3, "#b8bbc4", "")
         self.canvas.create_line(30, height - 10, width - 30, height - 10, fill="#18191d", width=1)
-
-    def compact_attention_agent(self):
-        if not self.config_data.get("compact_led_enabled", True):
-            return None
-        if not self.agents:
-            return None
-        for agent in self.agents:
-            if agent["status"] == "Needs You":
-                return agent
-        if time.time() < self.done_notice_until:
-            return next((agent for agent in self.agents if agent["key"] == "codex"), self.agents[0])
-        return None
-
-    def rounded_rect_point(self, progress, x1, y1, x2, y2, radius):
-        width = x2 - x1
-        height = y2 - y1
-        straight_x = max(1, width - 2 * radius)
-        straight_y = max(1, height - 2 * radius)
-        arc = math.pi * radius / 2
-        perimeter = 2 * straight_x + 2 * straight_y + 4 * arc
-        distance = (progress % 1.0) * perimeter
-        if distance < straight_x:
-            return x1 + radius + distance, y1
-        distance -= straight_x
-        if distance < arc:
-            angle = -math.pi / 2 + distance / arc * math.pi / 2
-            return x2 - radius + math.cos(angle) * radius, y1 + radius + math.sin(angle) * radius
-        distance -= arc
-        if distance < straight_y:
-            return x2, y1 + radius + distance
-        distance -= straight_y
-        if distance < arc:
-            angle = 0 + distance / arc * math.pi / 2
-            return x2 - radius + math.cos(angle) * radius, y2 - radius + math.sin(angle) * radius
-        distance -= arc
-        if distance < straight_x:
-            return x2 - radius - distance, y2
-        distance -= straight_x
-        if distance < arc:
-            angle = math.pi / 2 + distance / arc * math.pi / 2
-            return x1 + radius + math.cos(angle) * radius, y2 - radius + math.sin(angle) * radius
-        distance -= arc
-        if distance < straight_y:
-            return x1, y2 - radius - distance
-        distance -= straight_y
-        angle = math.pi + distance / arc * math.pi / 2
-        return x1 + radius + math.cos(angle) * radius, y1 + radius + math.sin(angle) * radius
-
-    def draw_compact_led_band(self, color):
-        x1, y1, x2, y2 = 6, 6, self.current_width - 6, self.current_height - 7
-        radius = max(1, (y2 - y1) // 2)
-        bead_count = max(32, int(self.config_data.get("compact_led_beads", 64)))
-        speed = max(0.5, float(self.config_data.get("compact_led_speed", 3.0)))
-        head = (self.phase * 0.045 * speed) % 1.0
-        base = "#111317"
-        dim = blend_color(base, color, 0.22)
-
-        for index in range(bead_count):
-            progress = index / bead_count
-            px, py = self.rounded_rect_point(progress, x1, y1, x2, y2, radius)
-            distance = abs(progress - head)
-            distance = min(distance, 1.0 - distance)
-            intensity = max(0.0, 1.0 - distance / 0.11)
-            intensity = intensity * intensity
-            size = 0.75 + intensity * 1.05
-            dot_color = blend_color(dim, color, min(0.92, intensity * 0.95))
-            if intensity > 0.72:
-                glow = 2.4 + intensity * 1.2
-                self.canvas.create_oval(
-                    px - glow,
-                    py - glow,
-                    px + glow,
-                    py + glow,
-                    fill=blend_color("#050505", color, 0.35),
-                    outline="",
-                )
-            if intensity > 0.88:
-                dot_color = blend_color(color, "#ffffff", 0.42)
-            self.canvas.create_oval(
-                px - size,
-                py - size,
-                px + size,
-                py + size,
-                fill=dot_color,
-                outline="",
-            )
 
     def status_color(self, status, fallback):
         return {
@@ -1031,9 +887,6 @@ class AgentIsland(tk.Tk):
             self.codex_region = None
             self.cursor_region = None
             self.agent_regions = []
-            attention_agent = self.compact_attention_agent()
-            if attention_agent:
-                self.draw_compact_led_band(attention_agent.get("color") or self.colors["needs_you"])
             mid = self.current_width // 2
             visible_agents = self.agents[: int(self.config_data.get("max_visible_agents", 4))]
             spacing = 22
@@ -1127,7 +980,6 @@ class AgentIsland(tk.Tk):
             self.peek_until = now_seconds() + 4
         if self.has_seen_status and previous in ("Running", "Needs You") and current in ("Done", "Idle"):
             self.flash_until = time.time() + float(self.config_data["completion_flash_seconds"])
-            self.done_notice_until = time.time() + float(self.config_data.get("done_led_seconds", 45))
             if not self.config_data.get("muted"):
                 try:
                     winsound.MessageBeep(winsound.MB_ICONASTERISK)
@@ -1139,8 +991,7 @@ class AgentIsland(tk.Tk):
         self.codex = codex
         self.cursor = cursor
         self.agents = agents
-        if not self.drag_start:
-            self.render()
+        self.render()
         delay = int(float(self.config_data["refresh_seconds"]) * 1000)
         self.after(max(500, delay), self.refresh_state)
 
@@ -1152,53 +1003,40 @@ class AgentIsland(tk.Tk):
 
     def animate(self):
         self.phase += 0.22
-        if self.drag_start:
-            self.after(120, self.animate)
-            return
         if (
             self.expanded
             and self.expanded_until
             and time.time() >= self.expanded_until
+            and not (self.codex and self.codex["status"] == "Needs You")
         ):
             self.expanded = False
             self.expanded_until = 0
             self.peek_until = 0
             self.render()
         if self.config_data.get("animation_enabled") and self.codex and self.cursor:
-            if (
-                self.codex["status"] in ("Running", "Needs You")
-                or now_seconds() < self.flash_until
-                or (self.is_quiet_compact() and self.compact_attention_agent())
-            ):
+            if self.codex["status"] in ("Running", "Needs You") or now_seconds() < self.flash_until:
                 self.render()
         self.after(120, self.animate)
 
     def on_click(self, event):
-        current_time = time.time()
-        debounce_seconds = max(0, int(self.config_data.get("click_debounce_ms", 90))) / 1000
-        if current_time - self.last_click_ts < debounce_seconds:
-            return
-        self.last_click_ts = current_time
         was_quiet = self.is_quiet_compact()
         clicked_agent = None if was_quiet else self.agent_at(event.x, event.y)
         if was_quiet:
-            self.compact_double_until = current_time + 0.5
+            self.compact_double_until = time.time() + 0.5
             self.pending_double_agent_key = None
         elif clicked_agent:
             self.pending_double_agent_key = clicked_agent["key"]
-            self.pending_double_agent_until = current_time + 0.5
+            self.pending_double_agent_until = time.time() + 0.5
 
         if was_quiet:
-            if self.compact_attention_agent() and time.time() < self.done_notice_until:
-                self.done_notice_until = 0
             self.expanded = True
-            self.expanded_until = current_time + float(self.config_data.get("manual_expand_seconds", 2))
+            self.expanded_until = time.time() + float(self.config_data.get("manual_expand_seconds", 2))
             self.peek_until = 0
             self.render()
             return
         self.expanded = not self.expanded
         self.expanded_until = (
-            current_time + float(self.config_data.get("manual_expand_seconds", 2))
+            time.time() + float(self.config_data.get("manual_expand_seconds", 2))
             if self.expanded
             else 0
         )
@@ -1241,13 +1079,6 @@ class AgentIsland(tk.Tk):
         return None
 
     def on_drag_start(self, event):
-        if self.geometry_anim_job:
-            self.after_cancel(self.geometry_anim_job)
-            self.geometry_anim_job = None
-        if self.drag_frame_job:
-            self.after_cancel(self.drag_frame_job)
-            self.drag_frame_job = None
-        self.drag_pending_geometry = None
         self.drag_start = {
             "pointer_x": event.x_root,
             "pointer_y": event.y_root,
@@ -1271,34 +1102,16 @@ class AgentIsland(tk.Tk):
         self.config_data["position_mode"] = "custom"
         self.config_data["custom_x"] = int(x)
         self.config_data["custom_y"] = int(y)
-        geometry = (int(x), int(y), self.current_width, self.current_height)
-        self.displayed_geometry = geometry
-        self.geometry_target = geometry
-        self.apply_drag_geometry(geometry)
-
-    def apply_drag_frame(self):
-        self.drag_frame_job = None
-        if not self.drag_pending_geometry:
-            return
-        geometry = self.drag_pending_geometry
-        self.drag_pending_geometry = None
-        self.displayed_geometry = geometry
-        self.geometry_target = geometry
-        self.apply_drag_geometry(geometry)
-        if self.drag_start:
-            delay = max(8, int(self.config_data.get("drag_frame_ms", 16)))
-            self.drag_frame_job = self.after(delay, self.apply_drag_frame)
+        self.displayed_geometry = (int(x), int(y), self.current_width, self.current_height)
+        self.geometry_target = self.displayed_geometry
+        self.apply_geometry(self.displayed_geometry)
 
     def on_pointer_release(self, event):
         if self.drag_start and self.drag_start.get("moved"):
-            if self.drag_frame_job:
-                self.after_cancel(self.drag_frame_job)
-                self.drag_frame_job = None
-            self.drag_pending_geometry = None
             save_config(self.config_data)
-            self.drag_start = None
+            self.after(80, lambda: setattr(self, "drag_start", None))
             return
-        self.drag_start = None
+        self.after(80, lambda: setattr(self, "drag_start", None))
         if time.time() < self.suppress_single_until:
             return
         self.on_click(event)
