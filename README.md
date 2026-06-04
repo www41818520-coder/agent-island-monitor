@@ -6,7 +6,8 @@ Windows 顶部悬浮的 AI 状态迷你胶囊，灵感来自 Apple Dynamic Islan
 
 ## 功能亮点
 
-- **默认迷你胶囊**：平时只显示两个极小状态点，减少遮挡浏览器标签栏、按钮和文字。
+- **默认迷你胶囊**：平时只显示极小状态点，减少遮挡浏览器标签栏、按钮和文字。
+- **自动发现 Agent**：除 Codex、Cursor/CC 外，会自动识别本机常见 AI 工具窗口或进程，例如 Claude、Copilot、Windsurf、Trae、Cline 等。
 - **事件展开**：Codex 开始运行、完成或需要你处理时，小岛会短暂或持续舒展开。
 - **自动收回**：手动展开后 2 秒无人操作会自动回到迷你胶囊。
 - **快速过渡**：迷你胶囊和展开态之间使用短动画过渡，避免生硬跳变。
@@ -14,7 +15,7 @@ Windows 顶部悬浮的 AI 状态迷你胶囊，灵感来自 Apple Dynamic Islan
 - **Codex 状态监控**：读取本机 Codex 日志和状态文件，显示 `Running`、`Needs You`、`Done`、`Idle`、`Offline`。
 - **Cursor/CC 诚实状态**：Cursor 开着但没有证据表明 AI 在生成时显示 `Open`，不误报 `Running`。
 - **双击召唤窗口**：展开态双击 `Codex` 或 `Cursor/CC` 胶囊，自动把对应窗口切到前台并最大化。
-- **极简展开态**：展开后只显示 Codex 与 Cursor/CC 两个胶囊，不显示日志、线程列表或冗余文字。
+- **极简展开态**：展开后只显示短状态胶囊，不显示日志、线程列表或冗余文字。
 - **托盘菜单**：支持显示/隐藏、安静模式、静音提醒、开机自启、退出。
 - **无需第三方依赖**：使用 Python 标准库 + Tkinter + Win32 `ctypes` 实现。
 
@@ -35,6 +36,13 @@ Windows 顶部悬浮的 AI 状态迷你胶囊，灵感来自 Apple Dynamic Islan
 - `Offline`：没有检测到 Cursor 进程。
 
 > `Cursor/CC` 指 Cursor + CC/Claude Code 转接工作环境。本工具当前只做窗口和进程级轻量检测，不读取 DeepSeek/Claude 的内部生成状态。
+
+### 自动发现的 Agent
+
+- `Active`：该 Agent 窗口是当前前台窗口。
+- `Open`：检测到该 Agent 的窗口或进程，但它不在前台。
+- 自动发现只表示“这个工具开着”，不代表它正在思考、生成或写代码。
+- 右键展开态里的候选 Agent 胶囊，可以标记为确认的 Agent，或把它加入忽略列表。
 
 ## 展开逻辑
 
@@ -71,14 +79,15 @@ powershell -ExecutionPolicy Bypass -File .\uninstall_startup.ps1
 
 ### 交互
 
-- 点击迷你胶囊：展开双状态胶囊。
+- 点击迷你胶囊：展开状态胶囊。
 - 2 秒无人操作：自动收回迷你胶囊。
 - 按住拖动：移动小岛位置，并自动保存。
 - 右键小岛：打开小岛菜单，可恢复默认位置或关闭。
-- 单击迷你胶囊：展开双状态胶囊。
+- 单击迷你胶囊：展开状态胶囊。
 - 单击展开态空白区域：收回迷你胶囊。
 - 双击展开态 `Codex` 胶囊：召唤 Codex 到前台并最大化。
 - 双击展开态 `Cursor/CC` 胶囊：召唤 Cursor 到前台并最大化。
+- 双击展开态自动发现的 Agent 胶囊：召唤对应窗口到前台并最大化。
 - 双击迷你胶囊：默认召唤 Codex。
 - 右键托盘图标：打开功能菜单。
 - 按 `Esc`：关闭小岛。
@@ -94,6 +103,9 @@ powershell -ExecutionPolicy Bypass -File .\uninstall_startup.ps1
 - 大小胶囊过渡速度
 - 动画开关
 - 鼠标靠近自动上收备用功能
+- 自动发现 Agent 开关
+- 最大显示 Agent 数量
+- 已确认 / 已忽略 Agent 列表
 - 静音提醒
 - 小岛颜色
 - Codex 活跃/Needs You 判断阈值
@@ -101,7 +113,7 @@ powershell -ExecutionPolicy Bypass -File .\uninstall_startup.ps1
 ## 当前限制
 
 - 暂不监控 Gemini 网页端。
-- Cursor/CC 不读取 DeepSeek 或 Claude 的内部生成状态。
+- Cursor/CC 和自动发现的 Agent 不读取 DeepSeek、Claude 或其他模型的内部生成状态。
 - Codex 状态基于本地 sqlite/log 推断，如果 Codex 后续改变本地日志结构，需要更新监控逻辑。
 - Windows 有时会限制程序强制切换前台窗口；如果点击不能切过去，通常是系统前台窗口策略限制。
 

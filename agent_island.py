@@ -40,6 +40,10 @@ DEFAULT_CONFIG = {
     "quiet_mode": True,
     "muted": False,
     "max_threads": 4,
+    "max_visible_agents": 4,
+    "auto_discover_agents": True,
+    "agent_registry": {},
+    "ignored_agents": [],
     "width": 424,
     "quiet_width": 118,
     "collapsed_height": 50,
@@ -101,6 +105,7 @@ NIF_TIP = 0x00000004
 IDI_APPLICATION = 32512
 
 MF_STRING = 0x00000000
+MF_SEPARATOR = 0x00000800
 TPM_RETURNCMD = 0x0100
 TPM_RIGHTBUTTON = 0x0002
 
@@ -151,6 +156,20 @@ def load_config():
 def save_config(config):
     with CONFIG_PATH.open("w", encoding="utf-8") as handle:
         json.dump(config, handle, ensure_ascii=False, indent=2)
+
+
+KNOWN_AGENT_PATTERNS = {
+    "claude": {"label": "Claude", "color": "#d99a6c"},
+    "cursor": {"label": "Cursor/CC", "color": "#c084fc"},
+    "ima.copilot": {"label": "ima.copilot", "color": "#48d597"},
+    "copilot": {"label": "Copilot", "color": "#48d597"},
+    "windsurf": {"label": "Windsurf", "color": "#38bdf8"},
+    "trae": {"label": "Trae", "color": "#f472b6"},
+    "cline": {"label": "Cline", "color": "#a78bfa"},
+    "roo": {"label": "Roo", "color": "#f59e0b"},
+    "continue": {"label": "Continue", "color": "#22c55e"},
+    "gemini": {"label": "Gemini", "color": "#60a5fa"},
+}
 
 
 def now_seconds():
@@ -261,6 +280,90 @@ def activate_matching_window(kind, windows, maximize=True):
         return True
     except Exception:
         return False
+
+
+def normalize_agent_key(text):
+    clean = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(text or ""))
+    while "--" in clean:
+        clean = clean.replace("--", "-")
+    return clean.strip("-")
+
+
+def match_agent_pattern(process, title):
+    haystack = f"{process or ''} {title or ''}".lower()
+    for pattern, meta in KNOWN_AGENT_PATTERNS.items():
+        if pattern in haystack:
+            return pattern, meta
+    return None, None
+
+
+def classify_generic_agents(names, windows, config):
+    if not config.get("auto_discover_agents", True):
+        return []
+
+    ignored = set(config.get("ignored_agents", []))
+    registry = config.get("agent_registry", {})
+    foreground = get_foreground_hwnd()
+    found = {}
+
+    for info in windows:
+        process = info.get("process", "")
+        title = info.get("title", "")
+        pattern, meta = match_agent_pattern(process, title)
+        if not pattern or pattern in ("codex", "cursor"):
+            continue
+        key = normalize_agent_key(pattern)
+        if key in ignored:
+            continue
+        status = "Active" if info["hwnd"] == foreground else "Open"
+        registered = registry.get(key, {})
+        found[key] = {
+            "key": key,
+            "label": registered.get("label") or meta["label"],
+            "status": status,
+            "since_ts": now_seconds(),
+            "title": title,
+            "windows": [info],
+            "color": registered.get("color") or meta["color"],
+            "confirmed": bool(registered.get("confirmed", False)),
+            "candidate": not bool(registered.get("confirmed", False)),
+        }
+
+    for name in names:
+        pattern, meta = match_agent_pattern(name, "")
+        if not pattern or pattern in ("codex", "cursor"):
+            continue
+        key = normalize_agent_key(pattern)
+        if key in ignored or key in found:
+            continue
+        registered = registry.get(key, {})
+        found[key] = {
+            "key": key,
+            "label": registered.get("label") or meta["label"],
+            "status": "Open",
+            "since_ts": now_seconds(),
+            "title": "",
+            "windows": [],
+            "color": registered.get("color") or meta["color"],
+            "confirmed": bool(registered.get("confirmed", False)),
+            "candidate": not bool(registered.get("confirmed", False)),
+        }
+
+    return sorted(found.values(), key=lambda item: (not item["confirmed"], item["label"].lower()))
+
+
+def activate_agent(agent, windows):
+    for info in agent.get("windows", []):
+        hwnd = info["hwnd"]
+        try:
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            user32.ShowWindow(hwnd, SW_MAXIMIZE)
+            user32.SetForegroundWindow(hwnd)
+            return True
+        except Exception:
+            pass
+    key = agent.get("key", "")
+    return activate_matching_window(key, windows)
 
 
 def read_recent_threads(limit):
@@ -564,6 +667,8 @@ class AgentIsland(tk.Tk):
         self.visible = True
         self.codex = None
         self.cursor = None
+        self.agents = []
+        self.agent_regions = []
         self.windows = []
         self.status_since = {}
         self.last_main_status = "Offline"
@@ -582,6 +687,7 @@ class AgentIsland(tk.Tk):
         self.phase = 0
         self.codex_region = None
         self.cursor_region = None
+        self.context_agent_key = None
 
         self.overrideredirect(True)
         self.attributes("-topmost", True)
@@ -619,6 +725,13 @@ class AgentIsland(tk.Tk):
     def geometry_for_state(self):
         quiet = self.is_quiet_compact()
         base_width = int(self.config_data["quiet_width"] if quiet else self.config_data["width"])
+        if not quiet and self.agents:
+            visible_count = min(
+                len(self.agents),
+                int(self.config_data.get("max_visible_agents", 4)),
+            )
+            base_width = max(base_width, 142 * max(1, visible_count) + 28)
+            base_width = min(base_width, max(180, self.winfo_screenwidth() - 40))
         height = int(
             self.config_data["quiet_height"]
             if quiet
@@ -632,6 +745,7 @@ class AgentIsland(tk.Tk):
             x = int(self.config_data.get("custom_x") or 0)
         else:
             x = int((self.winfo_screenwidth() - width) / 2)
+        x = max(0, min(x, self.winfo_screenwidth() - width))
         normal_y = int(self.config_data["top_offset"])
         if self.config_data.get("position_mode") == "custom":
             normal_y = int(self.config_data.get("custom_y") or normal_y)
@@ -722,6 +836,10 @@ class AgentIsland(tk.Tk):
         return f"{status} · {age_text(since_ts)}"
 
     def draw_status_chip(self, x1, y1, x2, y2, label, status, since_ts, color):
+        width = x2 - x1
+        status_text = self.status_label(status, since_ts) if width >= 150 else status
+        label_limit = 12 if width >= 150 else 7
+        label_text = truncate_text(label, label_limit) if width >= 118 else str(label or "?")[:1].upper()
         pulse_on = False
         if self.config_data.get("animation_enabled"):
             if status == "Running":
@@ -739,7 +857,7 @@ class AgentIsland(tk.Tk):
         self.canvas.create_text(
             x1 + 34,
             y1 + 18,
-            text=label,
+            text=label_text,
             fill=self.colors["muted"],
             anchor="w",
             font=("Segoe UI", 9),
@@ -747,14 +865,14 @@ class AgentIsland(tk.Tk):
         self.canvas.create_text(
             x2 - 14,
             y1 + 18,
-            text=self.status_label(status, since_ts),
+            text=status_text,
             fill=self.colors["text"],
             anchor="e",
-            font=("Segoe UI Semibold", 9),
+            font=("Segoe UI Semibold", 8 if width < 150 else 9),
         )
 
     def render(self):
-        if not self.codex or not self.cursor:
+        if not self.agents:
             return
         self.geometry_for_state()
         codex_status = self.codex["status"]
@@ -763,38 +881,60 @@ class AgentIsland(tk.Tk):
             bg = "#191104"
         self.draw_shell(bg)
 
-        codex_color = self.status_color(codex_status, self.colors["running"])
-        cursor_color = self.status_color(self.cursor["status"], self.colors["cursor"])
-
         if self.is_quiet_compact():
             self.codex_region = None
             self.cursor_region = None
+            self.agent_regions = []
             mid = self.current_width // 2
-            self.canvas.create_oval(mid - 28, 11, mid - 14, 25, fill="", outline="#34363d", width=1)
-            self.canvas.create_oval(mid - 24, 15, mid - 18, 21, fill=codex_color, outline="")
-            self.canvas.create_line(mid - 2, 15, mid - 2, 21, fill="#2a2b30", width=1)
-            self.canvas.create_oval(mid + 12, 11, mid + 26, 25, fill="", outline="#34363d", width=1)
-            self.canvas.create_oval(mid + 16, 15, mid + 22, 21, fill=cursor_color, outline="")
+            visible_agents = self.agents[: int(self.config_data.get("max_visible_agents", 4))]
+            spacing = 22
+            start = mid - ((len(visible_agents) - 1) * spacing) // 2
+            for index, agent in enumerate(visible_agents):
+                cx = start + index * spacing
+                color = agent.get("color") or self.status_color(agent["status"], self.colors["cursor"])
+                self.canvas.create_oval(cx - 7, 11, cx + 7, 25, fill="", outline="#34363d", width=1)
+                self.canvas.create_oval(cx - 3, 15, cx + 3, 21, fill=color, outline="")
+            hidden_count = max(0, len(self.agents) - len(visible_agents))
+            if hidden_count:
+                self.canvas.create_text(
+                    self.current_width - 17,
+                    17,
+                    text=f"+{hidden_count}",
+                    fill=self.colors["muted"],
+                    anchor="center",
+                    font=("Segoe UI Semibold", 7),
+                )
             return
 
-        self.codex_region = (16, 9, 204, 41)
-        self.cursor_region = (220, 9, 408, 41)
-        self.draw_status_chip(16, 9, 204, 41, "Codex", codex_status, self.codex["since_ts"], codex_color)
-        self.draw_status_chip(
-            220,
-            9,
-            408,
-            41,
-            "Cursor/CC",
-            self.cursor["status"],
-            self.cursor["since_ts"],
-            cursor_color,
-        )
+        self.agent_regions = []
+        visible_agents = self.agents[: int(self.config_data.get("max_visible_agents", 4))]
+        chip_width = max(92, min(188, (self.current_width - 28) // max(1, len(visible_agents))))
+        x = 14
+        for agent in visible_agents:
+            x2 = min(self.current_width - 14, x + chip_width)
+            color = agent.get("color") or self.status_color(agent["status"], self.colors["cursor"])
+            label = truncate_text(agent["label"], 12)
+            self.draw_status_chip(x, 9, x2, 41, label, agent["status"], agent["since_ts"], color)
+            region = (x, 9, x2, 41, agent["key"])
+            self.agent_regions.append(region)
+            if agent["key"] == "codex":
+                self.codex_region = region
+            if agent["key"] == "cursor":
+                self.cursor_region = region
+            x = x2 + 8
 
         if now_seconds() < self.flash_until:
             progress = 1 - max(0, self.flash_until - time.time()) / float(self.config_data["completion_flash_seconds"])
-            sweep_x = 26 + int(progress * 360)
-            self.draw_rounded_rect(max(26, sweep_x - 70), 44, min(398, sweep_x), 47, 3, self.colors["done"], "")
+            sweep_x = 26 + int(progress * max(40, self.current_width - 64))
+            self.draw_rounded_rect(
+                max(26, sweep_x - 70),
+                44,
+                min(self.current_width - 26, sweep_x),
+                47,
+                3,
+                self.colors["done"],
+                "",
+            )
 
         return
 
@@ -805,6 +945,32 @@ class AgentIsland(tk.Tk):
         cursor = classify_cursor(names, self.windows)
         codex["since_ts"] = self.stabilize_since("codex", codex["status"], codex["since_ts"])
         cursor["since_ts"] = self.stabilize_since("cursor", cursor["status"], cursor["since_ts"])
+        generic_agents = classify_generic_agents(names, self.windows, self.config_data)
+        agents = [
+            {
+                "key": "codex",
+                "label": "Codex",
+                "status": codex["status"],
+                "since_ts": codex["since_ts"],
+                "color": self.status_color(codex["status"], self.colors["running"]),
+                "windows": [],
+                "confirmed": True,
+            },
+            {
+                "key": "cursor",
+                "label": "Cursor/CC",
+                "status": cursor["status"],
+                "since_ts": cursor["since_ts"],
+                "color": self.colors["cursor"],
+                "windows": cursor.get("windows", []),
+                "confirmed": True,
+            },
+        ]
+        for agent in generic_agents:
+            agent["since_ts"] = self.stabilize_since(
+                f"agent:{agent['key']}", agent["status"], agent["since_ts"]
+            )
+            agents.append(agent)
 
         previous = self.last_main_status
         current = codex["status"]
@@ -822,6 +988,7 @@ class AgentIsland(tk.Tk):
         self.has_seen_status = True
         self.codex = codex
         self.cursor = cursor
+        self.agents = agents
         self.render()
         delay = int(float(self.config_data["refresh_seconds"]) * 1000)
         self.after(max(500, delay), self.refresh_state)
@@ -874,16 +1041,22 @@ class AgentIsland(tk.Tk):
             if not activate_matching_window("codex", self.windows):
                 self.peek_until = now_seconds() + 2
             return
-        if self.region_contains(self.codex_region, event.x, event.y):
-            if not activate_matching_window("codex", self.windows):
-                self.peek_until = now_seconds() + 2
-            return
-        if self.region_contains(self.cursor_region, event.x, event.y):
-            if not activate_matching_window("cursor", self.windows):
+        agent = self.agent_at(event.x, event.y)
+        if agent:
+            if not activate_agent(agent, self.windows):
                 self.peek_until = now_seconds() + 2
             return
         if not activate_matching_window("codex", self.windows):
             self.peek_until = now_seconds() + 2
+
+    def agent_at(self, x, y):
+        for region in self.agent_regions:
+            x1, y1, x2, y2, key = region
+            if x1 <= x <= x2 and y1 <= y <= y2:
+                for agent in self.agents:
+                    if agent["key"] == key:
+                        return agent
+        return None
 
     def on_drag_start(self, event):
         self.drag_start = {
@@ -929,8 +1102,15 @@ class AgentIsland(tk.Tk):
         self.click_after_id = None
         self.on_click(event)
 
-    def show_window_menu(self, _event=None):
+    def show_window_menu(self, event=None):
         menu = user32.CreatePopupMenu()
+        agent = self.agent_at(event.x, event.y) if event else None
+        self.context_agent_key = None
+        if agent and agent.get("key") not in ("codex", "cursor"):
+            self.context_agent_key = agent["key"]
+            user32.AppendMenuW(menu, MF_STRING, 2003, f"标记为 Agent：{agent['label']}")
+            user32.AppendMenuW(menu, MF_STRING, 2004, f"忽略：{agent['label']}")
+            user32.AppendMenuW(menu, MF_SEPARATOR, 0, "")
         user32.AppendMenuW(menu, MF_STRING, 2001, "恢复默认位置")
         user32.AppendMenuW(menu, MF_STRING, 2002, "关闭")
         point = POINT()
@@ -950,6 +1130,10 @@ class AgentIsland(tk.Tk):
             self.reset_position()
         elif command == 2002:
             self.shutdown()
+        elif command == 2003 and self.context_agent_key:
+            self.confirm_agent(self.context_agent_key)
+        elif command == 2004 and self.context_agent_key:
+            self.ignore_agent(self.context_agent_key)
 
     def reset_position(self):
         self.config_data["position_mode"] = "center"
@@ -957,6 +1141,29 @@ class AgentIsland(tk.Tk):
         self.config_data["custom_y"] = None
         save_config(self.config_data)
         self.tucked = False
+        self.render()
+
+    def confirm_agent(self, key):
+        registry = self.config_data.setdefault("agent_registry", {})
+        agent = next((item for item in self.agents if item["key"] == key), None)
+        if not agent:
+            return
+        registry[key] = {
+            "label": agent.get("label") or key,
+            "color": agent.get("color") or self.colors["cursor"],
+            "confirmed": True,
+        }
+        save_config(self.config_data)
+        self.render()
+
+    def ignore_agent(self, key):
+        ignored = self.config_data.setdefault("ignored_agents", [])
+        if key not in ignored:
+            ignored.append(key)
+        registry = self.config_data.setdefault("agent_registry", {})
+        registry.pop(key, None)
+        self.agents = [agent for agent in self.agents if agent["key"] != key]
+        save_config(self.config_data)
         self.render()
 
     def on_mouse_enter(self, _event):
