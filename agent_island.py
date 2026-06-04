@@ -32,15 +32,15 @@ DEFAULT_CONFIG = {
     "codex_waiting_seconds": 60,
     "completion_flash_seconds": 4,
     "animation_enabled": True,
-    "auto_tuck_on_hover": True,
+    "auto_tuck_on_hover": False,
     "tucked_visible_pixels": 6,
-    "quiet_mode": False,
+    "quiet_mode": True,
     "muted": False,
     "max_threads": 4,
     "width": 424,
-    "quiet_width": 168,
+    "quiet_width": 118,
     "collapsed_height": 50,
-    "quiet_height": 38,
+    "quiet_height": 34,
     "expanded_height": 188,
     "top_offset": 8,
     "colors": {
@@ -442,10 +442,8 @@ def classify_cursor(names, windows):
         status = "Offline"
     elif active:
         status = "Active"
-    elif cursor_windows:
-        status = "Running"
     else:
-        status = "Idle"
+        status = "Open"
 
     return {
         "status": status,
@@ -563,6 +561,7 @@ class AgentIsland(tk.Tk):
         self.windows = []
         self.status_since = {}
         self.last_main_status = "Offline"
+        self.has_seen_status = False
         self.flash_until = 0
         self.peek_until = 0
         self.tucked = False
@@ -655,6 +654,7 @@ class AgentIsland(tk.Tk):
             "Idle": self.colors["idle"],
             "Offline": self.colors["offline"],
             "Active": fallback,
+            "Open": fallback,
         }.get(status, fallback)
 
     def status_label(self, status, since_ts):
@@ -708,14 +708,14 @@ class AgentIsland(tk.Tk):
         cursor_color = self.status_color(self.cursor["status"], self.colors["cursor"])
 
         if self.is_quiet_compact():
-            self.codex_region = (34, 12, 73, 33)
-            self.cursor_region = (94, 12, 133, 33)
-            self.canvas.create_oval(45, 15, 59, 29, fill="", outline="#34363d", width=1)
-            self.canvas.create_oval(49, 19, 55, 25, fill=codex_color, outline="")
-            self.canvas.create_oval(105, 15, 119, 29, fill="", outline="#34363d", width=1)
-            self.canvas.create_oval(109, 19, 115, 25, fill=cursor_color, outline="")
-            if codex_status == "Running":
-                self.canvas.create_text(84, 22, text="AI", fill=self.colors["muted"], font=("Segoe UI Semibold", 9))
+            self.codex_region = None
+            self.cursor_region = None
+            mid = self.current_width // 2
+            self.canvas.create_oval(mid - 28, 11, mid - 14, 25, fill="", outline="#34363d", width=1)
+            self.canvas.create_oval(mid - 24, 15, mid - 18, 21, fill=codex_color, outline="")
+            self.canvas.create_line(mid - 2, 15, mid - 2, 21, fill="#2a2b30", width=1)
+            self.canvas.create_oval(mid + 12, 11, mid + 26, 25, fill="", outline="#34363d", width=1)
+            self.canvas.create_oval(mid + 16, 15, mid + 22, 21, fill=cursor_color, outline="")
             return
 
         self.codex_region = (16, 9, 204, 41)
@@ -800,9 +800,9 @@ class AgentIsland(tk.Tk):
 
         previous = self.last_main_status
         current = codex["status"]
-        if previous != current:
+        if self.has_seen_status and previous != current:
             self.peek_until = now_seconds() + 4
-        if previous in ("Running", "Needs You") and current in ("Done", "Idle"):
+        if self.has_seen_status and previous in ("Running", "Needs You") and current in ("Done", "Idle"):
             self.flash_until = time.time() + float(self.config_data["completion_flash_seconds"])
             if not self.config_data.get("muted"):
                 try:
@@ -811,6 +811,7 @@ class AgentIsland(tk.Tk):
                     pass
 
         self.last_main_status = current
+        self.has_seen_status = True
         self.codex = codex
         self.cursor = cursor
         self.render()
@@ -831,6 +832,11 @@ class AgentIsland(tk.Tk):
         self.after(120, self.animate)
 
     def on_click(self, event):
+        if self.is_quiet_compact():
+            self.expanded = True
+            self.peek_until = now_seconds() + 4
+            self.render()
+            return
         if self.region_contains(self.codex_region, event.x, event.y):
             if not activate_matching_window("codex", self.windows):
                 self.peek_until = now_seconds() + 4
@@ -840,7 +846,7 @@ class AgentIsland(tk.Tk):
                 self.peek_until = now_seconds() + 4
             return
         self.expanded = not self.expanded
-        self.peek_until = now_seconds() + 4
+        self.peek_until = 0 if not self.expanded else now_seconds() + 4
         self.render()
 
     def on_mouse_enter(self, _event):

@@ -5,7 +5,7 @@ E:\08-codex project\agent-island-monitor
 
 一、这个工具是做什么的
 
-这是一个 Windows 顶部悬浮小窗，外观接近苹果“灵动岛”，用于在你做其他事情时快速查看后台 AI 工具的大致状态，并作为一键最大化召唤工作窗口的入口。
+这是一个 Windows 顶部悬浮的 AI 状态迷你胶囊。平时只显示两个极小状态点，尽量不遮挡网页顶部按钮和文字；当 Codex 有运行、完成或需要你处理的事件时，才舒展开显示详情。
 
 当前监控两项：
 
@@ -16,53 +16,51 @@ E:\08-codex project\agent-island-monitor
 
 2. Cursor/CC
    - 检测 Cursor 是否运行。
-   - 检测 Cursor 窗口是否处于活跃状态。
-   - 这里的 Cursor/CC 指你的 Cursor + CC/Claude Code 转接工作环境。
-   - 当前不会精确判断 DeepSeek 生成是否完成，只做窗口和进程级轻量监控。
+   - 检测 Cursor 窗口是否处于前台。
+   - Cursor 开着但不在前台时显示 Open，不再显示 Running。
+   - 当前不会精确判断 DeepSeek/Claude 是否正在生成，只做窗口和进程级轻量监控。
 
 二、状态含义
 
 Codex:
 
-- Running：最近有 Codex 日志活动，并且 Codex/runner 进程存在。
-- Needs You：最近日志中出现授权、确认、等待输入、失败、需要处理等线索。
+- Running：检测到真实 Codex runner 或明确活跃任务。
+- Needs You：检测到授权、确认、等待输入、需要处理等线索。
 - Done：最近有 Codex 线程记录，但当前没有明显运行活动。
 - Idle：Codex 程序存在，但最近没有明显任务活动。
 - Offline：没有检测到 Codex 相关活动。
 
 Cursor/CC:
 
-- Active：Cursor 正在运行，并且当前前台窗口是 Cursor。
-- Running：Cursor 正在运行，但不是当前前台窗口。
-- Idle：检测到 Cursor 进程，但没有可靠窗口标题。
+- Active：Cursor 是当前前台窗口。
+- Open：Cursor 开着但不在前台；这不代表 DeepSeek/Claude 正在生成。
 - Offline：没有检测到 Cursor 进程。
 
-三、交互方式
+三、默认迷你胶囊逻辑
 
-点击 Codex 胶囊：
+- Idle / Open / Offline：保持迷你胶囊。
+- Running：状态变化时展开约 4 秒，然后自动回到迷你胶囊。
+- Done：完成时展开约 4 秒，然后自动回到迷你胶囊。
+- Needs You：持续展开，直到状态解除。
+
+四、交互方式
+
+点击迷你胶囊：
+- 展开完整小岛。
+
+展开态点击 Codex 胶囊：
 - 尝试召唤 Codex 窗口到前台，并最大化显示。
 
-点击 Cursor/CC 胶囊：
+展开态点击 Cursor/CC 胶囊：
 - 尝试召唤 Cursor 窗口到前台，并最大化显示。
 
-点击小岛空白区域：
-- 展开或收起详情。
-
-鼠标移到小岛上：
-- 默认会自动上收到屏幕顶部，只露一条边，给浏览器标签栏和按钮让路。
-- 鼠标离开原区域后，小岛会自动恢复。
+展开态点击空白区域：
+- 收回迷你胶囊。
 
 按 Esc：
 - 关闭小岛。
 
-四、提醒和动画
-
-- Running：状态点会有轻微呼吸动画。
-- Needs You：状态点会变成琥珀色脉冲，并显示需要你处理的提示。
-- Done：从 Running 或 Needs You 变成 Done/Idle 时，会播放提示音，并出现短暂绿色完成扫光。
-- 每个状态会显示持续时间，例如 Running · 3m、Needs You · 18s。
-
-五、系统托盘菜单
+五、托盘菜单
 
 右键系统托盘里的 Agent Island 图标，可以使用：
 
@@ -72,50 +70,22 @@ Cursor/CC:
 - 开机自启
 - 退出
 
-左键托盘图标：
-- 显示或隐藏小岛。
-
-六、安静模式
-
-安静模式开启后，小岛在普通状态下会收缩成极简黑色胶囊，只保留状态点。
-
-以下情况会临时显示完整状态：
-- 状态发生变化
-- Codex 进入 Needs You
-- Codex 刚刚完成
-- 手动点击展开
-
-七、启动和开机自启
-
-手动启动：
-双击 start_agent_island.bat
-
-开机自启脚本：
-install_startup.ps1
-
-取消开机自启脚本：
-uninstall_startup.ps1
-
-启动项位置：
-C:\Users\Administrator\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\Agent Island.lnk
-
-八、配置文件
+六、配置文件
 
 配置文件：
 config.json
 
 可以调整：
 - 刷新间隔
-- 安静模式
-- 鼠标靠近自动让路
-- 静音提醒
+- 迷你胶囊尺寸
 - 动画开关
-- 小岛尺寸
-- 颜色
+- 鼠标靠近自动上收备用功能
+- 静音提醒
+- 小岛颜色
 - Codex 活跃和 Needs You 判断时间阈值
 - 展开态显示的 Codex 线程数量
 
-九、当前限制
+七、当前限制
 
 1. Gemini 网页端暂未监控。
 
@@ -127,6 +97,4 @@ config.json
 
 4. Windows 有时会限制程序强制切换前台窗口。
    如果点击不能切过去，说明被系统前台窗口策略拦住，不是小岛崩溃。
-
-
 

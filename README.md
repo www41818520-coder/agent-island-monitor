@@ -1,21 +1,20 @@
-# Agent Island Monitor
+﻿# Agent Island Monitor
 
-Windows 顶部悬浮的 AI 状态小岛，灵感来自 Apple Dynamic Island。它用于在后台运行 Codex、Cursor/CC 时，快速查看任务状态，并一键最大化召唤对应 AI 工作窗口。
+Windows 顶部悬浮的 AI 状态迷你胶囊，灵感来自 Apple Dynamic Island。它用于在后台运行 Codex、Cursor/CC 时，用最小遮挡查看状态，并在需要时展开为完整控制入口。
 
 ![Agent Island Monitor screenshot](assets/screenshot.png)
 
 ## 功能亮点
 
+- **默认迷你胶囊**：平时只显示两个极小状态点，减少遮挡浏览器标签栏、按钮和文字。
+- **事件展开**：Codex 开始运行、完成或需要你处理时，小岛会短暂或持续舒展开。
 - **Codex 状态监控**：读取本机 Codex 日志和状态文件，显示 `Running`、`Needs You`、`Done`、`Idle`、`Offline`。
-- **Cursor/CC 轻量监控**：检测 Cursor 是否运行、是否处于前台窗口。
-- **Needs You 提醒**：当 Codex 需要授权、确认、放行或用户输入时，以琥珀色状态提示。
-- **一键召唤窗口**：点击 `Codex` 或 `Cursor/CC` 胶囊，自动把对应窗口切到前台并最大化。
-- **苹果风格小岛 UI**：深黑胶囊、细环状态点、微弱动效、顶部高光和玻璃质感。
-- **展开详情**：点击空白区域展开，查看最近多个 Codex 线程和状态摘要。
+- **Cursor/CC 诚实状态**：Cursor 开着但没有证据表明 AI 在生成时显示 `Open`，不误报 `Running`。
+- **一键召唤窗口**：展开态点击 `Codex` 或 `Cursor/CC` 胶囊，自动把对应窗口切到前台并最大化。
 - **托盘菜单**：支持显示/隐藏、安静模式、静音提醒、开机自启、退出。
 - **无需第三方依赖**：使用 Python 标准库 + Tkinter + Win32 `ctypes` 实现。
 
-## 界面状态
+## 状态含义
 
 ### Codex
 
@@ -27,12 +26,20 @@ Windows 顶部悬浮的 AI 状态小岛，灵感来自 Apple Dynamic Island。�
 
 ### Cursor/CC
 
-- `Active`：Cursor 正在运行，并且是当前前台窗口。
-- `Running`：Cursor 正在运行，但不在前台。
-- `Idle`：检测到 Cursor 进程，但没有可靠窗口标题。
+- `Active`：Cursor 是当前前台窗口。
+- `Open`：Cursor 开着但不在前台；这不代表 DeepSeek/Claude 正在生成。
 - `Offline`：没有检测到 Cursor 进程。
 
 > `Cursor/CC` 指 Cursor + CC/Claude Code 转接工作环境。本工具当前只做窗口和进程级轻量检测，不读取 DeepSeek/Claude 的内部生成状态。
+
+## 展开逻辑
+
+- `Idle` / `Open` / `Offline`：保持迷你胶囊。
+- `Running`：状态变化时展开约 4 秒，然后自动回到迷你胶囊。
+- `Done`：完成时展开约 4 秒，显示完成反馈，然后自动回到迷你胶囊。
+- `Needs You`：持续展开，直到状态解除。
+- 手动点击迷你胶囊：展开完整小岛。
+- 展开态点击空白区域：收回迷你胶囊。
 
 ## 使用方法
 
@@ -60,9 +67,10 @@ powershell -ExecutionPolicy Bypass -File .\uninstall_startup.ps1
 
 ### 交互
 
-- 点击 `Codex` 胶囊：召唤 Codex 到前台并最大化。
-- 点击 `Cursor/CC` 胶囊：召唤 Cursor 到前台并最大化。
-- 点击小岛空白区域：展开或收起详情。
+- 点击迷你胶囊：展开完整小岛。
+- 展开态点击 `Codex` 胶囊：召唤 Codex 到前台并最大化。
+- 展开态点击 `Cursor/CC` 胶囊：召唤 Cursor 到前台并最大化。
+- 展开态点击空白区域：收回迷你胶囊。
 - 右键托盘图标：打开功能菜单。
 - 按 `Esc`：关闭小岛。
 
@@ -71,11 +79,11 @@ powershell -ExecutionPolicy Bypass -File .\uninstall_startup.ps1
 编辑 `config.json` 可调整：
 
 - 刷新间隔
-- 安静模式
-- 静音提醒
+- 迷你胶囊尺寸
 - 动画开关
-- 小岛尺寸
-- 颜色
+- 鼠标靠近自动上收备用功能
+- 静音提醒
+- 小岛颜色
 - Codex 活跃/Needs You 判断阈值
 - 展开态显示的线程数量
 
