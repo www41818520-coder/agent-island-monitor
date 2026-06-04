@@ -33,10 +33,13 @@ DEFAULT_CONFIG = {
     "completion_flash_seconds": 4,
     "done_led_seconds": 45,
     "manual_expand_seconds": 2,
-    "transition_ms": 110,
-    "transition_steps": 6,
+    "transition_ms": 120,
+    "transition_steps": 8,
+    "drag_frame_ms": 16,
     "click_debounce_ms": 90,
     "compact_led_enabled": True,
+    "compact_led_beads": 64,
+    "compact_led_speed": 3.0,
     "animation_enabled": True,
     "auto_tuck_on_hover": False,
     "tucked_visible_pixels": 6,
@@ -98,6 +101,10 @@ WM_LBUTTONUP = 0x0202
 WM_RBUTTONUP = 0x0205
 WM_DESTROY = 0x0002
 GWL_WNDPROC = -4
+SWP_NOSIZE = 0x0001
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+SWP_SHOWWINDOW = 0x0040
 
 NIM_ADD = 0
 NIM_MODIFY = 1
@@ -587,6 +594,27 @@ def age_text(ts):
     return f"{minutes // 60}h"
 
 
+def hex_to_rgb(color):
+    color = str(color or "#ffffff").strip().lstrip("#")
+    if len(color) != 6:
+        return 255, 255, 255
+    try:
+        return tuple(int(color[index : index + 2], 16) for index in (0, 2, 4))
+    except ValueError:
+        return 255, 255, 255
+
+
+def blend_color(a, b, amount):
+    amount = max(0.0, min(1.0, float(amount)))
+    ar, ag, ab = hex_to_rgb(a)
+    br, bg, bb = hex_to_rgb(b)
+    return "#{:02x}{:02x}{:02x}".format(
+        int(ar + (br - ar) * amount),
+        int(ag + (bg - ag) * amount),
+        int(ab + (bb - ab) * amount),
+    )
+
+
 class TrayIcon:
     def __init__(self, app):
         self.app = app
@@ -686,6 +714,8 @@ class AgentIsland(tk.Tk):
         self.displayed_geometry = None
         self.geometry_anim_job = None
         self.drag_start = None
+        self.drag_pending_geometry = None
+        self.drag_frame_job = None
         self.suppress_single_until = 0
         self.compact_double_until = 0
         self.pending_double_agent_key = None
@@ -780,8 +810,23 @@ class AgentIsland(tk.Tk):
         x, y, width, height = geometry
         self.geometry(f"{width}x{height}+{x}+{y}")
 
+    def apply_drag_geometry(self, geometry):
+        x, y, width, height = geometry
+        hwnd = self.winfo_id()
+        moved = user32.SetWindowPos(
+            hwnd,
+            None,
+            int(x),
+            int(y),
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        )
+        if not moved:
+            self.geometry(f"{width}x{height}+{x}+{y}")
+
     def animate_geometry(self, start, target, step):
-        total = max(1, int(self.config_data.get("transition_steps", 6)))
+        total = max(1, int(self.config_data.get("transition_steps", 8)))
         t = min(1.0, step / total)
         eased = 1 - (1 - t) ** 3
         current = tuple(
@@ -795,7 +840,7 @@ class AgentIsland(tk.Tk):
             self.displayed_geometry = target
             self.geometry_anim_job = None
             return
-        delay = max(8, int(self.config_data.get("transition_ms", 110)) // total)
+        delay = max(8, int(self.config_data.get("transition_ms", 120)) // total)
         self.geometry_anim_job = self.after(delay, lambda: self.animate_geometry(start, target, step + 1))
 
     def draw_rounded_rect(self, x1, y1, x2, y2, radius, fill, outline="", width=1):
@@ -872,20 +917,35 @@ class AgentIsland(tk.Tk):
         return x1 + radius + math.cos(angle) * radius, y1 + radius + math.sin(angle) * radius
 
     def draw_compact_led_band(self, color):
-        x1, y1, x2, y2 = 5, 5, self.current_width - 5, self.current_height - 6
+        x1, y1, x2, y2 = 6, 6, self.current_width - 6, self.current_height - 7
         radius = max(1, (y2 - y1) // 2)
-        self.draw_rounded_rect(x1, y1, x2, y2, radius, "", "#24262c", 1)
-        head = (self.phase * 0.045) % 1.0
-        for index in range(20):
-            progress = head - index * 0.012
+        bead_count = max(32, int(self.config_data.get("compact_led_beads", 64)))
+        speed = max(0.5, float(self.config_data.get("compact_led_speed", 3.0)))
+        head = (self.phase * 0.045 * speed) % 1.0
+        base = "#111317"
+        dim = blend_color(base, color, 0.22)
+
+        for index in range(bead_count):
+            progress = index / bead_count
             px, py = self.rounded_rect_point(progress, x1, y1, x2, y2, radius)
-            size = max(1.0, 2.8 - index * 0.08)
-            if index < 4:
-                dot_color = "#f4fff8"
-            elif index < 10:
-                dot_color = color
-            else:
-                dot_color = "#26342e"
+            distance = abs(progress - head)
+            distance = min(distance, 1.0 - distance)
+            intensity = max(0.0, 1.0 - distance / 0.11)
+            intensity = intensity * intensity
+            size = 0.75 + intensity * 1.05
+            dot_color = blend_color(dim, color, min(0.92, intensity * 0.95))
+            if intensity > 0.72:
+                glow = 2.4 + intensity * 1.2
+                self.canvas.create_oval(
+                    px - glow,
+                    py - glow,
+                    px + glow,
+                    py + glow,
+                    fill=blend_color("#050505", color, 0.35),
+                    outline="",
+                )
+            if intensity > 0.88:
+                dot_color = blend_color(color, "#ffffff", 0.42)
             self.canvas.create_oval(
                 px - size,
                 py - size,
@@ -1167,6 +1227,13 @@ class AgentIsland(tk.Tk):
         return None
 
     def on_drag_start(self, event):
+        if self.geometry_anim_job:
+            self.after_cancel(self.geometry_anim_job)
+            self.geometry_anim_job = None
+        if self.drag_frame_job:
+            self.after_cancel(self.drag_frame_job)
+            self.drag_frame_job = None
+        self.drag_pending_geometry = None
         self.drag_start = {
             "pointer_x": event.x_root,
             "pointer_y": event.y_root,
@@ -1190,16 +1257,39 @@ class AgentIsland(tk.Tk):
         self.config_data["position_mode"] = "custom"
         self.config_data["custom_x"] = int(x)
         self.config_data["custom_y"] = int(y)
-        self.displayed_geometry = (int(x), int(y), self.current_width, self.current_height)
-        self.geometry_target = self.displayed_geometry
-        self.apply_geometry(self.displayed_geometry)
+        self.drag_pending_geometry = (int(x), int(y), self.current_width, self.current_height)
+        if not self.drag_frame_job:
+            delay = max(8, int(self.config_data.get("drag_frame_ms", 16)))
+            self.drag_frame_job = self.after(delay, self.apply_drag_frame)
+
+    def apply_drag_frame(self):
+        self.drag_frame_job = None
+        if not self.drag_pending_geometry:
+            return
+        geometry = self.drag_pending_geometry
+        self.drag_pending_geometry = None
+        self.displayed_geometry = geometry
+        self.geometry_target = geometry
+        self.apply_drag_geometry(geometry)
+        if self.drag_start:
+            delay = max(8, int(self.config_data.get("drag_frame_ms", 16)))
+            self.drag_frame_job = self.after(delay, self.apply_drag_frame)
 
     def on_pointer_release(self, event):
         if self.drag_start and self.drag_start.get("moved"):
+            if self.drag_frame_job:
+                self.after_cancel(self.drag_frame_job)
+                self.drag_frame_job = None
+            if self.drag_pending_geometry:
+                geometry = self.drag_pending_geometry
+                self.drag_pending_geometry = None
+                self.displayed_geometry = geometry
+                self.geometry_target = geometry
+                self.apply_drag_geometry(geometry)
             save_config(self.config_data)
-            self.after(80, lambda: setattr(self, "drag_start", None))
+            self.drag_start = None
             return
-        self.after(80, lambda: setattr(self, "drag_start", None))
+        self.drag_start = None
         if time.time() < self.suppress_single_until:
             return
         self.on_click(event)
