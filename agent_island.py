@@ -32,8 +32,8 @@ DEFAULT_CONFIG = {
     "codex_waiting_seconds": 60,
     "completion_flash_seconds": 4,
     "manual_expand_seconds": 2,
-    "transition_ms": 150,
-    "transition_steps": 8,
+    "transition_ms": 110,
+    "transition_steps": 6,
     "animation_enabled": True,
     "auto_tuck_on_hover": False,
     "tucked_visible_pixels": 6,
@@ -682,8 +682,10 @@ class AgentIsland(tk.Tk):
         self.displayed_geometry = None
         self.geometry_anim_job = None
         self.drag_start = None
-        self.click_after_id = None
         self.suppress_single_until = 0
+        self.compact_double_until = 0
+        self.pending_double_agent_key = None
+        self.pending_double_agent_until = 0
         self.phase = 0
         self.codex_region = None
         self.cursor_region = None
@@ -776,7 +778,7 @@ class AgentIsland(tk.Tk):
         self.geometry(f"{width}x{height}+{x}+{y}")
 
     def animate_geometry(self, start, target, step):
-        total = max(1, int(self.config_data.get("transition_steps", 8)))
+        total = max(1, int(self.config_data.get("transition_steps", 6)))
         t = min(1.0, step / total)
         eased = 1 - (1 - t) ** 3
         current = tuple(
@@ -790,7 +792,7 @@ class AgentIsland(tk.Tk):
             self.displayed_geometry = target
             self.geometry_anim_job = None
             return
-        delay = max(10, int(self.config_data.get("transition_ms", 150)) // total)
+        delay = max(8, int(self.config_data.get("transition_ms", 110)) // total)
         self.geometry_anim_job = self.after(delay, lambda: self.animate_geometry(start, target, step + 1))
 
     def draw_rounded_rect(self, x1, y1, x2, y2, radius, fill, outline="", width=1):
@@ -1017,7 +1019,16 @@ class AgentIsland(tk.Tk):
         self.after(120, self.animate)
 
     def on_click(self, event):
-        if self.is_quiet_compact():
+        was_quiet = self.is_quiet_compact()
+        clicked_agent = None if was_quiet else self.agent_at(event.x, event.y)
+        if was_quiet:
+            self.compact_double_until = time.time() + 0.5
+            self.pending_double_agent_key = None
+        elif clicked_agent:
+            self.pending_double_agent_key = clicked_agent["key"]
+            self.pending_double_agent_until = time.time() + 0.5
+
+        if was_quiet:
             self.expanded = True
             self.expanded_until = time.time() + float(self.config_data.get("manual_expand_seconds", 2))
             self.peek_until = 0
@@ -1033,10 +1044,19 @@ class AgentIsland(tk.Tk):
         self.render()
 
     def on_double_click(self, event):
-        if self.click_after_id:
-            self.after_cancel(self.click_after_id)
-            self.click_after_id = None
         self.suppress_single_until = time.time() + 0.35
+        if time.time() < self.compact_double_until:
+            self.compact_double_until = 0
+            if not activate_matching_window("codex", self.windows):
+                self.peek_until = now_seconds() + 2
+            return
+        if self.pending_double_agent_key and time.time() < self.pending_double_agent_until:
+            key = self.pending_double_agent_key
+            self.pending_double_agent_key = None
+            agent = next((item for item in self.agents if item["key"] == key), None)
+            if agent and not activate_agent(agent, self.windows):
+                self.peek_until = now_seconds() + 2
+            return
         if self.is_quiet_compact():
             if not activate_matching_window("codex", self.windows):
                 self.peek_until = now_seconds() + 2
@@ -1094,12 +1114,6 @@ class AgentIsland(tk.Tk):
         self.after(80, lambda: setattr(self, "drag_start", None))
         if time.time() < self.suppress_single_until:
             return
-        if self.click_after_id:
-            self.after_cancel(self.click_after_id)
-        self.click_after_id = self.after(180, lambda: self.run_single_click(event))
-
-    def run_single_click(self, event):
-        self.click_after_id = None
         self.on_click(event)
 
     def show_window_menu(self, event=None):
