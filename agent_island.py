@@ -586,6 +586,7 @@ class AgentIsland(tk.Tk):
         self.canvas = tk.Canvas(self, highlightthickness=0, bd=0, bg=TRANSPARENT_COLOR)
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Button-1>", self.on_click)
+        self.canvas.bind("<Double-Button-1>", self.on_double_click)
         self.canvas.bind("<Enter>", self.on_mouse_enter)
         self.bind("<Escape>", lambda _event: self.shutdown())
 
@@ -665,12 +666,13 @@ class AgentIsland(tk.Tk):
         self.geometry_anim_job = self.after(delay, lambda: self.animate_geometry(start, target, step + 1))
 
     def draw_rounded_rect(self, x1, y1, x2, y2, radius, fill, outline="", width=1):
+        radius = max(1, min(radius, int((x2 - x1) / 2), int((y2 - y1) / 2)))
         points = []
         for start in (180, 270, 0, 90):
             cx = x1 + radius if start in (180, 90) else x2 - radius
             cy = y1 + radius if start in (180, 270) else y2 - radius
-            for i in range(10):
-                angle = math.radians(start + i * 9)
+            for i in range(16):
+                angle = math.radians(start + i * 6)
                 points.append((cx + math.cos(angle) * radius, cy + math.sin(angle) * radius))
         flat = [coord for point in points for coord in point]
         self.canvas.create_polygon(flat, smooth=True, fill=fill, outline=outline, width=width)
@@ -680,11 +682,11 @@ class AgentIsland(tk.Tk):
         height = self.current_height
         self.canvas.delete("all")
         self.canvas.configure(width=width, height=height, bg=TRANSPARENT_COLOR)
-        radius = min(30, height // 2 - 1)
-        self.draw_rounded_rect(7, 9, width - 7, height - 1, radius, self.colors["shadow"], "")
-        self.draw_rounded_rect(3, 3, width - 3, height - 5, radius, "#000000", self.colors["border"], 1)
-        self.draw_rounded_rect(5, 5, width - 5, height - 7, radius - 2, background, self.colors["rim"], 1)
-        self.draw_rounded_rect(12, 8, width - 12, max(28, height // 2 + 6), radius - 8, self.colors["surface"], "")
+        radius = max(1, height // 2)
+        self.draw_rounded_rect(6, 8, width - 6, height - 1, radius, self.colors["shadow"], "")
+        self.draw_rounded_rect(2, 2, width - 2, height - 4, radius, "#000000", self.colors["border"], 1)
+        self.draw_rounded_rect(4, 4, width - 4, height - 6, radius, background, self.colors["rim"], 1)
+        self.draw_rounded_rect(11, 7, width - 11, max(27, height // 2 + 6), radius - 7, self.colors["surface"], "")
         self.draw_rounded_rect(24, 8, width - 24, 18, 8, "#6d6e76", "")
         self.draw_rounded_rect(38, 10, width - 38, 14, 3, "#b8bbc4", "")
         self.canvas.create_line(30, height - 10, width - 30, height - 10, fill="#18191d", width=1)
@@ -840,14 +842,6 @@ class AgentIsland(tk.Tk):
             self.peek_until = 0
             self.render()
             return
-        if self.region_contains(self.codex_region, event.x, event.y):
-            if not activate_matching_window("codex", self.windows):
-                self.peek_until = now_seconds() + 4
-            return
-        if self.region_contains(self.cursor_region, event.x, event.y):
-            if not activate_matching_window("cursor", self.windows):
-                self.peek_until = now_seconds() + 4
-            return
         self.expanded = not self.expanded
         self.expanded_until = (
             time.time() + float(self.config_data.get("manual_expand_seconds", 2))
@@ -856,6 +850,22 @@ class AgentIsland(tk.Tk):
         )
         self.peek_until = 0
         self.render()
+
+    def on_double_click(self, event):
+        if self.is_quiet_compact():
+            if not activate_matching_window("codex", self.windows):
+                self.peek_until = now_seconds() + 2
+            return
+        if self.region_contains(self.codex_region, event.x, event.y):
+            if not activate_matching_window("codex", self.windows):
+                self.peek_until = now_seconds() + 2
+            return
+        if self.region_contains(self.cursor_region, event.x, event.y):
+            if not activate_matching_window("cursor", self.windows):
+                self.peek_until = now_seconds() + 2
+            return
+        if not activate_matching_window("codex", self.windows):
+            self.peek_until = now_seconds() + 2
 
     def on_mouse_enter(self, _event):
         if not self.config_data.get("auto_tuck_on_hover"):
