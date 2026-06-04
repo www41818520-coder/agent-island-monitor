@@ -31,6 +31,9 @@ DEFAULT_CONFIG = {
     "codex_active_seconds": 20,
     "codex_waiting_seconds": 60,
     "completion_flash_seconds": 4,
+    "manual_expand_seconds": 2,
+    "transition_ms": 150,
+    "transition_steps": 8,
     "animation_enabled": True,
     "auto_tuck_on_hover": False,
     "tucked_visible_pixels": 6,
@@ -564,8 +567,12 @@ class AgentIsland(tk.Tk):
         self.has_seen_status = False
         self.flash_until = 0
         self.peek_until = 0
+        self.expanded_until = 0
         self.tucked = False
         self.last_geometry = (0, 0, 0, 0)
+        self.geometry_target = None
+        self.displayed_geometry = None
+        self.geometry_anim_job = None
         self.phase = 0
         self.codex_region = None
         self.cursor_region = None
@@ -616,10 +623,46 @@ class AgentIsland(tk.Tk):
         y = normal_y
         if self.tucked:
             y = -height + int(self.config_data.get("tucked_visible_pixels", 6))
+        self.last_geometry = (x, normal_y, width, height)
         self.current_width = width
         self.current_height = height
-        self.last_geometry = (x, normal_y, width, height)
+        self.set_geometry_target(x, y, width, height)
+
+    def set_geometry_target(self, x, y, width, height):
+        target = (int(x), int(y), int(width), int(height))
+        if self.geometry_target == target:
+            return
+        self.geometry_target = target
+        if not self.displayed_geometry or not self.config_data.get("animation_enabled"):
+            self.apply_geometry(target)
+            self.displayed_geometry = target
+            return
+        if self.geometry_anim_job:
+            self.after_cancel(self.geometry_anim_job)
+            self.geometry_anim_job = None
+        self.animate_geometry(self.displayed_geometry, target, 1)
+
+    def apply_geometry(self, geometry):
+        x, y, width, height = geometry
         self.geometry(f"{width}x{height}+{x}+{y}")
+
+    def animate_geometry(self, start, target, step):
+        total = max(1, int(self.config_data.get("transition_steps", 8)))
+        t = min(1.0, step / total)
+        eased = 1 - (1 - t) ** 3
+        current = tuple(
+            int(start[index] + (target[index] - start[index]) * eased)
+            for index in range(4)
+        )
+        self.apply_geometry(current)
+        self.displayed_geometry = current
+        if step >= total:
+            self.apply_geometry(target)
+            self.displayed_geometry = target
+            self.geometry_anim_job = None
+            return
+        delay = max(10, int(self.config_data.get("transition_ms", 150)) // total)
+        self.geometry_anim_job = self.after(delay, lambda: self.animate_geometry(start, target, step + 1))
 
     def draw_rounded_rect(self, x1, y1, x2, y2, radius, fill, outline="", width=1):
         points = []
@@ -775,6 +818,16 @@ class AgentIsland(tk.Tk):
 
     def animate(self):
         self.phase += 0.22
+        if (
+            self.expanded
+            and self.expanded_until
+            and time.time() >= self.expanded_until
+            and not (self.codex and self.codex["status"] == "Needs You")
+        ):
+            self.expanded = False
+            self.expanded_until = 0
+            self.peek_until = 0
+            self.render()
         if self.config_data.get("animation_enabled") and self.codex and self.cursor:
             if self.codex["status"] in ("Running", "Needs You") or now_seconds() < self.flash_until:
                 self.render()
@@ -783,7 +836,8 @@ class AgentIsland(tk.Tk):
     def on_click(self, event):
         if self.is_quiet_compact():
             self.expanded = True
-            self.peek_until = now_seconds() + 4
+            self.expanded_until = time.time() + float(self.config_data.get("manual_expand_seconds", 2))
+            self.peek_until = 0
             self.render()
             return
         if self.region_contains(self.codex_region, event.x, event.y):
@@ -795,7 +849,12 @@ class AgentIsland(tk.Tk):
                 self.peek_until = now_seconds() + 4
             return
         self.expanded = not self.expanded
-        self.peek_until = 0 if not self.expanded else now_seconds() + 4
+        self.expanded_until = (
+            time.time() + float(self.config_data.get("manual_expand_seconds", 2))
+            if self.expanded
+            else 0
+        )
+        self.peek_until = 0
         self.render()
 
     def on_mouse_enter(self, _event):

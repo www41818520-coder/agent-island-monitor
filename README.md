@@ -8,6 +8,8 @@ Windows 顶部悬浮的 AI 状态迷你胶囊，灵感来自 Apple Dynamic Islan
 
 - **默认迷你胶囊**：平时只显示两个极小状态点，减少遮挡浏览器标签栏、按钮和文字。
 - **事件展开**：Codex 开始运行、完成或需要你处理时，小岛会短暂或持续舒展开。
+- **自动收回**：手动展开后 2 秒无人操作会自动回到迷你胶囊。
+- **快速过渡**：迷你胶囊和展开态之间使用短动画过渡，避免生硬跳变。
 - **Codex 状态监控**：读取本机 Codex 日志和状态文件，显示 `Running`、`Needs You`、`Done`、`Idle`、`Offline`。
 - **Cursor/CC 诚实状态**：Cursor 开着但没有证据表明 AI 在生成时显示 `Open`，不误报 `Running`。
 - **一键召唤窗口**：展开态点击 `Codex` 或 `Cursor/CC` 胶囊，自动把对应窗口切到前台并最大化。
@@ -39,7 +41,7 @@ Windows 顶部悬浮的 AI 状态迷你胶囊，灵感来自 Apple Dynamic Islan
 - `Running`：状态变化时展开约 4 秒，然后自动回到迷你胶囊。
 - `Done`：完成时展开约 4 秒，显示完成反馈，然后自动回到迷你胶囊。
 - `Needs You`：持续展开，直到状态解除。
-- 手动点击迷你胶囊：展开双状态胶囊。
+- 手动点击迷你胶囊：展开双状态胶囊，2 秒后自动收回。
 - 展开态点击空白区域：收回迷你胶囊。
 
 ## 使用方法
@@ -69,6 +71,7 @@ powershell -ExecutionPolicy Bypass -File .\uninstall_startup.ps1
 ### 交互
 
 - 点击迷你胶囊：展开双状态胶囊。
+- 2 秒无人操作：自动收回迷你胶囊。
 - 展开态点击 `Codex` 胶囊：召唤 Codex 到前台并最大化。
 - 展开态点击 `Cursor/CC` 胶囊：召唤 Cursor 到前台并最大化。
 - 展开态点击空白区域：收回迷你胶囊。
@@ -81,6 +84,8 @@ powershell -ExecutionPolicy Bypass -File .\uninstall_startup.ps1
 
 - 刷新间隔
 - 迷你胶囊尺寸
+- 手动展开自动收回时间
+- 大小胶囊过渡速度
 - 动画开关
 - 鼠标靠近自动上收备用功能
 - 静音提醒
