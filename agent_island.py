@@ -37,8 +37,8 @@ DEFAULT_CONFIG = {
     "transition_steps": 8,
     "drag_frame_ms": 16,
     "click_debounce_ms": 90,
-    "compact_led_enabled": True,
-    "compact_led_beads": 64,
+    "compact_led_enabled": False,
+    "compact_led_beads": 32,
     "compact_led_speed": 3.0,
     "animation_enabled": True,
     "auto_tuck_on_hover": False,
@@ -91,6 +91,16 @@ user32.CallWindowProcW.argtypes = [
     wintypes.UINT,
     wintypes.WPARAM,
     wintypes.LPARAM,
+]
+user32.SetWindowPos.restype = wintypes.BOOL
+user32.SetWindowPos.argtypes = [
+    wintypes.HWND,
+    wintypes.HWND,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    ctypes.c_int,
+    wintypes.UINT,
 ]
 
 SW_RESTORE = 9
@@ -1129,7 +1139,8 @@ class AgentIsland(tk.Tk):
         self.codex = codex
         self.cursor = cursor
         self.agents = agents
-        self.render()
+        if not self.drag_start:
+            self.render()
         delay = int(float(self.config_data["refresh_seconds"]) * 1000)
         self.after(max(500, delay), self.refresh_state)
 
@@ -1141,6 +1152,9 @@ class AgentIsland(tk.Tk):
 
     def animate(self):
         self.phase += 0.22
+        if self.drag_start:
+            self.after(120, self.animate)
+            return
         if (
             self.expanded
             and self.expanded_until
@@ -1257,10 +1271,10 @@ class AgentIsland(tk.Tk):
         self.config_data["position_mode"] = "custom"
         self.config_data["custom_x"] = int(x)
         self.config_data["custom_y"] = int(y)
-        self.drag_pending_geometry = (int(x), int(y), self.current_width, self.current_height)
-        if not self.drag_frame_job:
-            delay = max(8, int(self.config_data.get("drag_frame_ms", 16)))
-            self.drag_frame_job = self.after(delay, self.apply_drag_frame)
+        geometry = (int(x), int(y), self.current_width, self.current_height)
+        self.displayed_geometry = geometry
+        self.geometry_target = geometry
+        self.apply_drag_geometry(geometry)
 
     def apply_drag_frame(self):
         self.drag_frame_job = None
@@ -1280,12 +1294,7 @@ class AgentIsland(tk.Tk):
             if self.drag_frame_job:
                 self.after_cancel(self.drag_frame_job)
                 self.drag_frame_job = None
-            if self.drag_pending_geometry:
-                geometry = self.drag_pending_geometry
-                self.drag_pending_geometry = None
-                self.displayed_geometry = geometry
-                self.geometry_target = geometry
-                self.apply_drag_geometry(geometry)
+            self.drag_pending_geometry = None
             save_config(self.config_data)
             self.drag_start = None
             return
