@@ -31,9 +31,12 @@ DEFAULT_CONFIG = {
     "codex_active_seconds": 20,
     "codex_waiting_seconds": 60,
     "completion_flash_seconds": 4,
+    "done_led_seconds": 45,
     "manual_expand_seconds": 2,
     "transition_ms": 110,
     "transition_steps": 6,
+    "click_debounce_ms": 90,
+    "compact_led_enabled": True,
     "animation_enabled": True,
     "auto_tuck_on_hover": False,
     "tucked_visible_pixels": 6,
@@ -674,6 +677,7 @@ class AgentIsland(tk.Tk):
         self.last_main_status = "Offline"
         self.has_seen_status = False
         self.flash_until = 0
+        self.done_notice_until = 0
         self.peek_until = 0
         self.expanded_until = 0
         self.tucked = False
@@ -686,6 +690,7 @@ class AgentIsland(tk.Tk):
         self.compact_double_until = 0
         self.pending_double_agent_key = None
         self.pending_double_agent_until = 0
+        self.last_click_ts = 0
         self.phase = 0
         self.codex_region = None
         self.cursor_region = None
@@ -719,8 +724,6 @@ class AgentIsland(tk.Tk):
         if self.expanded or not self.config_data.get("quiet_mode"):
             return False
         if now_seconds() < self.peek_until or now_seconds() < self.flash_until:
-            return False
-        if self.codex and self.codex["status"] == "Needs You":
             return False
         return True
 
@@ -821,6 +824,77 @@ class AgentIsland(tk.Tk):
         self.draw_rounded_rect(38, 10, width - 38, 14, 3, "#b8bbc4", "")
         self.canvas.create_line(30, height - 10, width - 30, height - 10, fill="#18191d", width=1)
 
+    def compact_attention_agent(self):
+        if not self.config_data.get("compact_led_enabled", True):
+            return None
+        if not self.agents:
+            return None
+        for agent in self.agents:
+            if agent["status"] == "Needs You":
+                return agent
+        if time.time() < self.done_notice_until:
+            return next((agent for agent in self.agents if agent["key"] == "codex"), self.agents[0])
+        return None
+
+    def rounded_rect_point(self, progress, x1, y1, x2, y2, radius):
+        width = x2 - x1
+        height = y2 - y1
+        straight_x = max(1, width - 2 * radius)
+        straight_y = max(1, height - 2 * radius)
+        arc = math.pi * radius / 2
+        perimeter = 2 * straight_x + 2 * straight_y + 4 * arc
+        distance = (progress % 1.0) * perimeter
+        if distance < straight_x:
+            return x1 + radius + distance, y1
+        distance -= straight_x
+        if distance < arc:
+            angle = -math.pi / 2 + distance / arc * math.pi / 2
+            return x2 - radius + math.cos(angle) * radius, y1 + radius + math.sin(angle) * radius
+        distance -= arc
+        if distance < straight_y:
+            return x2, y1 + radius + distance
+        distance -= straight_y
+        if distance < arc:
+            angle = 0 + distance / arc * math.pi / 2
+            return x2 - radius + math.cos(angle) * radius, y2 - radius + math.sin(angle) * radius
+        distance -= arc
+        if distance < straight_x:
+            return x2 - radius - distance, y2
+        distance -= straight_x
+        if distance < arc:
+            angle = math.pi / 2 + distance / arc * math.pi / 2
+            return x1 + radius + math.cos(angle) * radius, y2 - radius + math.sin(angle) * radius
+        distance -= arc
+        if distance < straight_y:
+            return x1, y2 - radius - distance
+        distance -= straight_y
+        angle = math.pi + distance / arc * math.pi / 2
+        return x1 + radius + math.cos(angle) * radius, y1 + radius + math.sin(angle) * radius
+
+    def draw_compact_led_band(self, color):
+        x1, y1, x2, y2 = 5, 5, self.current_width - 5, self.current_height - 6
+        radius = max(1, (y2 - y1) // 2)
+        self.draw_rounded_rect(x1, y1, x2, y2, radius, "", "#24262c", 1)
+        head = (self.phase * 0.045) % 1.0
+        for index in range(20):
+            progress = head - index * 0.012
+            px, py = self.rounded_rect_point(progress, x1, y1, x2, y2, radius)
+            size = max(1.0, 2.8 - index * 0.08)
+            if index < 4:
+                dot_color = "#f4fff8"
+            elif index < 10:
+                dot_color = color
+            else:
+                dot_color = "#26342e"
+            self.canvas.create_oval(
+                px - size,
+                py - size,
+                px + size,
+                py + size,
+                fill=dot_color,
+                outline="",
+            )
+
     def status_color(self, status, fallback):
         return {
             "Running": self.colors["running"],
@@ -887,6 +961,9 @@ class AgentIsland(tk.Tk):
             self.codex_region = None
             self.cursor_region = None
             self.agent_regions = []
+            attention_agent = self.compact_attention_agent()
+            if attention_agent:
+                self.draw_compact_led_band(attention_agent.get("color") or self.colors["needs_you"])
             mid = self.current_width // 2
             visible_agents = self.agents[: int(self.config_data.get("max_visible_agents", 4))]
             spacing = 22
@@ -980,6 +1057,7 @@ class AgentIsland(tk.Tk):
             self.peek_until = now_seconds() + 4
         if self.has_seen_status and previous in ("Running", "Needs You") and current in ("Done", "Idle"):
             self.flash_until = time.time() + float(self.config_data["completion_flash_seconds"])
+            self.done_notice_until = time.time() + float(self.config_data.get("done_led_seconds", 45))
             if not self.config_data.get("muted"):
                 try:
                     winsound.MessageBeep(winsound.MB_ICONASTERISK)
@@ -1007,36 +1085,46 @@ class AgentIsland(tk.Tk):
             self.expanded
             and self.expanded_until
             and time.time() >= self.expanded_until
-            and not (self.codex and self.codex["status"] == "Needs You")
         ):
             self.expanded = False
             self.expanded_until = 0
             self.peek_until = 0
             self.render()
         if self.config_data.get("animation_enabled") and self.codex and self.cursor:
-            if self.codex["status"] in ("Running", "Needs You") or now_seconds() < self.flash_until:
+            if (
+                self.codex["status"] in ("Running", "Needs You")
+                or now_seconds() < self.flash_until
+                or (self.is_quiet_compact() and self.compact_attention_agent())
+            ):
                 self.render()
         self.after(120, self.animate)
 
     def on_click(self, event):
+        current_time = time.time()
+        debounce_seconds = max(0, int(self.config_data.get("click_debounce_ms", 90))) / 1000
+        if current_time - self.last_click_ts < debounce_seconds:
+            return
+        self.last_click_ts = current_time
         was_quiet = self.is_quiet_compact()
         clicked_agent = None if was_quiet else self.agent_at(event.x, event.y)
         if was_quiet:
-            self.compact_double_until = time.time() + 0.5
+            self.compact_double_until = current_time + 0.5
             self.pending_double_agent_key = None
         elif clicked_agent:
             self.pending_double_agent_key = clicked_agent["key"]
-            self.pending_double_agent_until = time.time() + 0.5
+            self.pending_double_agent_until = current_time + 0.5
 
         if was_quiet:
+            if self.compact_attention_agent() and time.time() < self.done_notice_until:
+                self.done_notice_until = 0
             self.expanded = True
-            self.expanded_until = time.time() + float(self.config_data.get("manual_expand_seconds", 2))
+            self.expanded_until = current_time + float(self.config_data.get("manual_expand_seconds", 2))
             self.peek_until = 0
             self.render()
             return
         self.expanded = not self.expanded
         self.expanded_until = (
-            time.time() + float(self.config_data.get("manual_expand_seconds", 2))
+            current_time + float(self.config_data.get("manual_expand_seconds", 2))
             if self.expanded
             else 0
         )
