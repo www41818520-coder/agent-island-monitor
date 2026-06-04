@@ -4,6 +4,8 @@
   "codex_waiting_seconds": 60,
   "completion_flash_seconds": 4,
   "animation_enabled": true,
+  "auto_tuck_on_hover": true,
+  "tucked_visible_pixels": 6,
   "quiet_mode": false,
   "muted": false,
   "max_threads": 4,

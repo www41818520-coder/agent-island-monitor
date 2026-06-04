@@ -31,6 +31,8 @@ DEFAULT_CONFIG = {
     "codex_waiting_seconds": 60,
     "completion_flash_seconds": 4,
     "animation_enabled": True,
+    "auto_tuck_on_hover": True,
+    "tucked_visible_pixels": 6,
     "quiet_mode": False,
     "muted": False,
     "max_threads": 4,
@@ -562,6 +564,8 @@ class AgentIsland(tk.Tk):
         self.last_main_status = "Offline"
         self.flash_until = 0
         self.peek_until = 0
+        self.tucked = False
+        self.last_geometry = (0, 0, 0, 0)
         self.phase = 0
         self.codex_region = None
         self.cursor_region = None
@@ -574,6 +578,7 @@ class AgentIsland(tk.Tk):
         self.canvas = tk.Canvas(self, highlightthickness=0, bd=0, bg="#010101")
         self.canvas.pack(fill="both", expand=True)
         self.canvas.bind("<Button-1>", self.on_click)
+        self.canvas.bind("<Enter>", self.on_mouse_enter)
         self.bind("<Escape>", lambda _event: self.shutdown())
 
         self.update_idletasks()
@@ -581,6 +586,7 @@ class AgentIsland(tk.Tk):
         self.tray.install()
         self.geometry_for_state()
         self.refresh_state()
+        self.watch_pointer()
         self.animate()
 
     def is_quiet_compact(self):
@@ -605,9 +611,13 @@ class AgentIsland(tk.Tk):
         extra = 12 if now_seconds() < self.flash_until and not quiet else 0
         width = base_width + extra
         x = int((self.winfo_screenwidth() - width) / 2)
-        y = int(self.config_data["top_offset"])
+        normal_y = int(self.config_data["top_offset"])
+        y = normal_y
+        if self.tucked:
+            y = -height + int(self.config_data.get("tucked_visible_pixels", 6))
         self.current_width = width
         self.current_height = height
+        self.last_geometry = (x, normal_y, width, height)
         self.geometry(f"{width}x{height}+{x}+{y}")
 
     def draw_rounded_rect(self, x1, y1, x2, y2, radius, fill, outline="", width=1):
@@ -830,6 +840,29 @@ class AgentIsland(tk.Tk):
         self.expanded = not self.expanded
         self.peek_until = now_seconds() + 4
         self.render()
+
+    def on_mouse_enter(self, _event):
+        if not self.config_data.get("auto_tuck_on_hover"):
+            return
+        if self.expanded or self.codex and self.codex["status"] == "Needs You":
+            return
+        self.tucked = True
+        self.geometry_for_state()
+
+    def watch_pointer(self):
+        if self.tucked:
+            point = POINT()
+            user32.GetCursorPos(ctypes.byref(point))
+            x, y, width, height = self.last_geometry
+            margin = 18
+            inside_original = (
+                x - margin <= point.x <= x + width + margin
+                and y - margin <= point.y <= y + height + margin
+            )
+            if not inside_original:
+                self.tucked = False
+                self.render()
+        self.after(150, self.watch_pointer)
 
     @staticmethod
     def region_contains(region, x, y):
