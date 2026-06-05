@@ -45,7 +45,7 @@ DEFAULT_CONFIG = {
     "agent_registry": {},
     "ignored_agents": [],
     "width": 424,
-    "quiet_width": 118,
+    "quiet_width": 92,
     "collapsed_height": 50,
     "quiet_height": 34,
     "expanded_height": 50,
@@ -71,6 +71,9 @@ DEFAULT_CONFIG = {
         "offline": "#666666",
         "cursor": "#c084fc",
     },
+    "compact_led_enabled": True,
+    "compact_led_speed": 5.0,
+    "compact_led_length": 28,
 }
 
 
@@ -184,6 +187,20 @@ KNOWN_AGENT_PATTERNS = {
 
 def now_seconds():
     return int(time.time())
+
+
+def blend_hex(color, background="#101114", amount=0.55):
+    color = str(color or "").lstrip("#")
+    background = str(background or "").lstrip("#")
+    if len(color) != 6 or len(background) != 6:
+        return "#34363d"
+    try:
+        fg = tuple(int(color[index : index + 2], 16) for index in (0, 2, 4))
+        bg = tuple(int(background[index : index + 2], 16) for index in (0, 2, 4))
+    except ValueError:
+        return "#34363d"
+    mixed = tuple(int(bg[i] + (fg[i] - bg[i]) * amount) for i in range(3))
+    return f"#{mixed[0]:02x}{mixed[1]:02x}{mixed[2]:02x}"
 
 
 def run_powershell(command, timeout=2):
@@ -691,6 +708,7 @@ class AgentIsland(tk.Tk):
         self.geometry_target = None
         self.displayed_geometry = None
         self.geometry_anim_job = None
+        self.force_instant_geometry_once = False
         self.drag_start = None
         self.native_drag_active = False
         self.suppress_single_until = 0
@@ -772,12 +790,22 @@ class AgentIsland(tk.Tk):
     def set_geometry_target(self, x, y, width, height):
         target = (int(x), int(y), int(width), int(height))
         if self.geometry_target == target:
+            self.force_instant_geometry_once = False
             return
         self.geometry_target = target
-        if not self.displayed_geometry or not self.config_data.get("animation_enabled"):
+        if (
+            self.force_instant_geometry_once
+            or not self.displayed_geometry
+            or not self.config_data.get("animation_enabled")
+        ):
+            if self.geometry_anim_job:
+                self.after_cancel(self.geometry_anim_job)
+                self.geometry_anim_job = None
             self.apply_geometry(target)
             self.displayed_geometry = target
+            self.force_instant_geometry_once = False
             return
+        self.force_instant_geometry_once = False
         if self.geometry_anim_job:
             self.after_cancel(self.geometry_anim_job)
             self.geometry_anim_job = None
@@ -823,13 +851,28 @@ class AgentIsland(tk.Tk):
         self.canvas.delete("all")
         self.canvas.configure(width=width, height=height, bg=TRANSPARENT_COLOR)
         radius = max(1, height // 2)
-        self.draw_rounded_rect(6, 8, width - 6, height - 1, radius, self.colors["shadow"], "")
-        self.draw_rounded_rect(2, 2, width - 2, height - 4, radius, "#000000", self.colors["border"], 1)
-        self.draw_rounded_rect(4, 4, width - 4, height - 6, radius, background, self.colors["rim"], 1)
-        self.draw_rounded_rect(11, 7, width - 11, max(27, height // 2 + 6), radius - 7, self.colors["surface"], "")
-        self.draw_rounded_rect(24, 8, width - 24, 18, 8, "#6d6e76", "")
-        self.draw_rounded_rect(38, 10, width - 38, 14, 3, "#b8bbc4", "")
-        self.canvas.create_line(30, height - 10, width - 30, height - 10, fill="#18191d", width=1)
+        quiet = self.is_quiet_compact()
+        outer = 1 if quiet else 2
+        inner = 3 if quiet else 4
+        shadow_x = 4 if quiet else 6
+        shine_x = 15 if quiet else 24
+        shine_inner_x = 24 if quiet else 38
+        line_x = 18 if quiet else 30
+        self.draw_rounded_rect(shadow_x, 8, width - shadow_x, height - 1, radius, self.colors["shadow"], "")
+        self.draw_rounded_rect(outer, 2, width - outer, height - 4, radius, "#000000", self.colors["border"], 1)
+        self.draw_rounded_rect(inner, 4, width - inner, height - 6, radius, background, self.colors["rim"], 1)
+        self.draw_rounded_rect(
+            inner + 6,
+            7,
+            width - inner - 6,
+            max(27, height // 2 + 6),
+            radius - 7,
+            self.colors["surface"],
+            "",
+        )
+        self.draw_rounded_rect(shine_x, 8, width - shine_x, 18, 8, "#6d6e76", "")
+        self.draw_rounded_rect(shine_inner_x, 10, width - shine_inner_x, 14, 3, "#b8bbc4", "")
+        self.canvas.create_line(line_x, height - 10, width - line_x, height - 10, fill="#18191d", width=1)
 
     def status_color(self, status, fallback):
         return {
@@ -883,6 +926,68 @@ class AgentIsland(tk.Tk):
             font=("Segoe UI Semibold", 8 if width < 150 else 9),
         )
 
+    def attention_agent(self):
+        if not self.agents:
+            return None
+        for status in ("Needs You", "Running"):
+            agent = next((item for item in self.agents if item["status"] == status), None)
+            if agent:
+                return agent
+        if time.time() < self.flash_until:
+            return next((item for item in self.agents if item["key"] == "codex"), self.agents[0])
+        return None
+
+    def capsule_path_point(self, distance, left, top, right, bottom):
+        radius = max(1.0, (bottom - top) / 2)
+        center_y = top + radius
+        straight = max(1.0, (right - left) - 2 * radius)
+        perimeter = 2 * straight + 2 * math.pi * radius
+        distance = distance % perimeter
+        if distance <= straight:
+            return left + radius + distance, top
+        distance -= straight
+        arc = math.pi * radius
+        if distance <= arc:
+            angle = -math.pi / 2 + distance / radius
+            center_x = right - radius
+            return center_x + math.cos(angle) * radius, center_y + math.sin(angle) * radius
+        distance -= arc
+        if distance <= straight:
+            return right - radius - distance, bottom
+        distance -= straight
+        angle = math.pi / 2 + distance / radius
+        center_x = left + radius
+        return center_x + math.cos(angle) * radius, center_y + math.sin(angle) * radius
+
+    def draw_compact_attention_trace(self, agent):
+        if not self.config_data.get("compact_led_enabled", True) or not agent:
+            return
+        width = self.current_width
+        height = self.current_height
+        speed = float(self.config_data.get("compact_led_speed", 5.0))
+        length = max(14, int(self.config_data.get("compact_led_length", 28)))
+        left, top, right, bottom = 7, 6, width - 7, height - 9
+        radius = max(1.0, (bottom - top) / 2)
+        straight = max(1.0, (right - left) - 2 * radius)
+        perimeter = 2 * straight + 2 * math.pi * radius
+        head = (self.phase * speed * 8) % perimeter
+        if time.time() < self.flash_until:
+            color = self.colors["done"]
+        else:
+            color = agent.get("color") or self.status_color(agent["status"], self.colors["running"])
+        glow = blend_hex(color, "#050505", 0.38)
+        mid = blend_hex(color, "#101114", 0.72)
+        samples = 7
+        points = [
+            self.capsule_path_point(head - length * (samples - 1 - index) / (samples - 1), left, top, right, bottom)
+            for index in range(samples)
+        ]
+        flat = [coord for point in points for coord in point]
+        self.canvas.create_line(flat, fill=glow, width=4, smooth=True, capstyle=tk.ROUND, joinstyle=tk.ROUND)
+        self.canvas.create_line(flat, fill=mid, width=2, smooth=True, capstyle=tk.ROUND, joinstyle=tk.ROUND)
+        hx, hy = points[-1]
+        self.canvas.create_oval(hx - 1.6, hy - 1.6, hx + 1.6, hy + 1.6, fill="#ffffff", outline="")
+
     def render(self):
         if not self.agents:
             return
@@ -899,12 +1004,12 @@ class AgentIsland(tk.Tk):
             self.agent_regions = []
             mid = self.current_width // 2
             visible_agents = self.agents[: int(self.config_data.get("max_visible_agents", 4))]
-            spacing = 22
+            spacing = 18
             start = mid - ((len(visible_agents) - 1) * spacing) // 2
             for index, agent in enumerate(visible_agents):
                 cx = start + index * spacing
                 color = agent.get("color") or self.status_color(agent["status"], self.colors["cursor"])
-                self.canvas.create_oval(cx - 7, 11, cx + 7, 25, fill="", outline="#34363d", width=1)
+                self.canvas.create_oval(cx - 6, 12, cx + 6, 24, fill="", outline="#34363d", width=1)
                 self.canvas.create_oval(cx - 3, 15, cx + 3, 21, fill=color, outline="")
             hidden_count = max(0, len(self.agents) - len(visible_agents))
             if hidden_count:
@@ -916,6 +1021,7 @@ class AgentIsland(tk.Tk):
                     anchor="center",
                     font=("Segoe UI Semibold", 7),
                 )
+            self.draw_compact_attention_trace(self.attention_agent())
             return
 
         self.agent_regions = []
@@ -1208,18 +1314,24 @@ class AgentIsland(tk.Tk):
     def on_mouse_enter(self, _event):
         if self.native_drag_active:
             return
+        if self.expanded and not self.tucked and self.peek_until == 0:
+            return
         self.tucked = False
         self.expanded = True
         self.expanded_until = 0
         self.peek_until = 0
+        self.force_instant_geometry_once = True
         self.render()
 
     def on_mouse_leave(self, _event):
         if self.native_drag_active or self.drag_start:
             return
+        if not self.expanded and self.peek_until == 0:
+            return
         self.expanded = False
         self.expanded_until = 0
         self.peek_until = 0
+        self.force_instant_geometry_once = True
         self.render()
 
     def watch_pointer(self):

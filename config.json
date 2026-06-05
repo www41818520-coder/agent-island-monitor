@@ -4,8 +4,8 @@
   "codex_waiting_seconds": 60,
   "completion_flash_seconds": 4,
   "manual_expand_seconds": 2,
-  "transition_ms": 150,
-  "transition_steps": 8,
+  "transition_ms": 110,
+  "transition_steps": 6,
   "animation_enabled": true,
   "auto_tuck_on_hover": false,
   "tucked_visible_pixels": 6,
@@ -17,7 +17,7 @@
   "agent_registry": {},
   "ignored_agents": [],
   "width": 424,
-  "quiet_width": 118,
+  "quiet_width": 92,
   "collapsed_height": 50,
   "quiet_height": 34,
   "expanded_height": 50,
@@ -42,5 +42,8 @@
     "idle": "#8b949e",
     "offline": "#666666",
     "cursor": "#c084fc"
-  }
+  },
+  "compact_led_enabled": true,
+  "compact_led_speed": 5.0,
+  "compact_led_length": 28
 }
